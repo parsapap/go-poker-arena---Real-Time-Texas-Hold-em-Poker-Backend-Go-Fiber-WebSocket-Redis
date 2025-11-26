@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"go-poker-arena/internal/anticheat"
@@ -12,6 +13,7 @@ import (
 	"go-poker-arena/internal/database"
 	"go-poker-arena/internal/history"
 	"go-poker-arena/internal/leaderboard"
+	"go-poker-arena/internal/logger"
 	"go-poker-arena/internal/matchmaking"
 	"go-poker-arena/internal/metrics"
 	"go-poker-arena/internal/middleware"
@@ -21,26 +23,36 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	ws "github.com/gofiber/websocket/v2"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 )
 
 func main() {
+	// Load environment variables
 	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found")
+		fmt.Println("No .env file found, using environment variables")
 	}
 
+	// Initialize logger
+	logger.Init()
+	logger.Info().Msg("Starting Go Poker Arena...")
+
+	// Connect to database
 	db, err := database.Connect()
 	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
+		logger.Fatal().Err(err).Msg("Failed to connect to database")
 	}
+	logger.Info().Msg("Database connected successfully")
 
+	// Run migrations
 	if err := database.Migrate(db); err != nil {
-		log.Fatal("Failed to migrate database:", err)
+		logger.Fatal().Err(err).Msg("Failed to migrate database")
 	}
+	logger.Info().Msg("Database migrations completed")
 
+	// Connect to Redis
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     fmt.Sprintf("%s:%s", os.Getenv("REDIS_HOST"), os.Getenv("REDIS_PORT")),
 		Password: os.Getenv("REDIS_PASSWORD"),
@@ -49,9 +61,9 @@ func main() {
 
 	ctx := context.Background()
 	if err := redisClient.Ping(ctx).Err(); err != nil {
-		log.Fatal("Failed to connect to Redis:", err)
+		logger.Fatal().Err(err).Msg("Failed to connect to Redis")
 	}
-	log.Println("Redis connected successfully")
+	logger.Info().Msg("Redis connected successfully")
 
 	// Initialize services
 	hub := websocket.NewHub(redisClient)
@@ -68,32 +80,94 @@ func main() {
 
 	// Start auto-matchmaking worker
 	go matchmakingQueue.AutoMatchWorker(10*time.Second, roomManager)
+	logger.Info().Msg("Auto-matchmaking worker started")
 
+	// Create Fiber app
 	app := fiber.New(fiber.Config{
-		AppName: "Go Poker Arena",
+		AppName:      "Go Poker Arena v1.0",
+		ServerHeader: "Go Poker Arena",
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			code := fiber.StatusInternalServerError
+			if e, ok := err.(*fiber.Error); ok {
+				code = e.Code
+			}
+			logger.Error().Err(err).Int("status", code).Str("path", c.Path()).Msg("Request error")
+			return c.Status(code).JSON(fiber.Map{"error": err.Error()})
+		},
 	})
 
-	// CORS configuration for HTTPS
+	// Middleware
+	app.Use(recover.New())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     os.Getenv("ALLOWED_ORIGINS"),
+		AllowOrigins:     getEnv("ALLOWED_ORIGINS", "*"),
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
 		AllowCredentials: true,
 	}))
-
-	app.Use(logger.New())
 	app.Use(metrics.MetricsMiddleware())
 
+	// Health check
 	app.Get("/healthz", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"status":  "ok",
 			"service": "go-poker-arena",
+			"version": "1.0.0",
 		})
 	})
 
 	app.Get("/metrics", metrics.MetricsHandler())
 
 	// Public auth endpoints
+	setupAuthRoutes(app, authService)
+
+	// Protected API routes
+	api := app.Group("/api", rateLimiter.Limit(100, 1*time.Minute))
+	api.Use(middleware.JWTAuth())
+	api.Use(adminMiddleware.CheckBanned())
+
+	setupAPIRoutes(api, roomManager, historyService, leaderboardManager, matchmakingQueue, anticheatValidator)
+	setupAdminRoutes(api, adminMiddleware, roomManager, authService)
+
+	// WebSocket endpoint
+	setupWebSocketRoute(app, hub, roomManager, rateLimiter)
+
+	// Graceful shutdown
+	port := getEnv("PORT", "8080")
+	go func() {
+		logger.Info().Str("port", port).Msg("Server starting")
+		if err := app.Listen(":" + port); err != nil {
+			logger.Fatal().Err(err).Msg("Server failed to start")
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+
+	logger.Info().Msg("Shutting down server...")
+
+	// Graceful shutdown with timeout
+	if err := app.ShutdownWithTimeout(30 * time.Second); err != nil {
+		logger.Error().Err(err).Msg("Server forced to shutdown")
+	}
+
+	// Close connections
+	redisClient.Close()
+	sqlDB, _ := db.DB()
+	sqlDB.Close()
+
+	logger.Info().Msg("Server exited gracefully")
+}
+
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+func setupAuthRoutes(app *fiber.App, authService *auth.Service) {
 	app.Post("/auth/signup", func(c *fiber.Ctx) error {
 		var req struct {
 			Username string `json:"username"`
@@ -107,6 +181,7 @@ func main() {
 
 		user, err := authService.Signup(req.Username, req.Email, req.Password)
 		if err != nil {
+			logger.Warn().Err(err).Str("username", req.Username).Msg("Signup failed")
 			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 		}
 
@@ -115,10 +190,8 @@ func main() {
 			return c.Status(500).JSON(fiber.Map{"error": "Failed to generate token"})
 		}
 
-		return c.Status(201).JSON(fiber.Map{
-			"user":  user,
-			"token": token,
-		})
+		logger.Info().Uint("user_id", user.ID).Str("username", user.Username).Msg("User signed up")
+		return c.Status(201).JSON(fiber.Map{"user": user, "token": token})
 	})
 
 	app.Post("/auth/login", func(c *fiber.Ctx) error {
@@ -133,10 +206,10 @@ func main() {
 
 		user, err := authService.Login(req.Username, req.Password)
 		if err != nil {
+			logger.Warn().Str("username", req.Username).Msg("Login failed")
 			return c.Status(401).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		// Update last IP
 		user.LastIP = c.IP()
 		authService.UpdateUser(user)
 
@@ -145,17 +218,15 @@ func main() {
 			return c.Status(500).JSON(fiber.Map{"error": "Failed to generate token"})
 		}
 
-		return c.JSON(fiber.Map{
-			"user":  user,
-			"token": token,
-		})
+		logger.Info().Uint("user_id", user.ID).Str("username", user.Username).Msg("User logged in")
+		return c.JSON(fiber.Map{"user": user, "token": token})
 	})
+}
 
-	// Protected API routes
-	api := app.Group("/api", rateLimiter.Limit(100, 1*time.Minute))
-	api.Use(middleware.JWTAuth())
-	api.Use(adminMiddleware.CheckBanned())
-
+func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService *history.Service, 
+	leaderboardManager *leaderboard.Leaderboard, matchmakingQueue *matchmaking.Queue, 
+	anticheatValidator *anticheat.Validator) {
+	
 	// Room endpoints
 	api.Get("/rooms", func(c *fiber.Ctx) error {
 		rooms, err := roomManager.ListRooms()
@@ -184,6 +255,7 @@ func main() {
 		}
 
 		metrics.ActiveRooms.Inc()
+		logger.Info().Uint("room_id", room.ID).Str("name", room.Name).Msg("Room created")
 		return c.Status(201).JSON(room)
 	})
 
@@ -201,6 +273,7 @@ func main() {
 		metrics.GamesTotal.Inc()
 		metrics.ActiveGames.Inc()
 		metrics.HandsDealt.Inc()
+		logger.Info().Uint("room_id", uint(roomID)).Msg("Game started")
 		return c.JSON(game)
 	})
 
@@ -221,8 +294,8 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
 		}
 
-		// Anti-cheat validation
 		if err := anticheatValidator.CheckLatency(req.Latency); err != nil {
+			logger.Warn().Uint("player_id", req.PlayerID).Int("latency", req.Latency).Msg("Latency check failed")
 			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 		}
 
@@ -237,10 +310,10 @@ func main() {
 		}
 
 		if err := anticheatValidator.ValidateAction(req.PlayerID, poker.Action(req.Action), req.Amount, pokerGame); err != nil {
+			logger.Warn().Uint("player_id", req.PlayerID).Str("action", req.Action).Msg("Action validation failed")
 			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		// Save action to history
 		historyService.SaveAction(pokerGame.ID, req.PlayerID, req.Action, req.Amount, string(pokerGame.Phase), req.Latency)
 
 		err = roomManager.ProcessAction(uint(roomID), req.PlayerID, poker.Action(req.Action), req.Amount)
@@ -248,12 +321,11 @@ func main() {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		// Return partial game state (hidden opponent cards)
 		partialState := anticheat.GetPartialGameState(pokerGame, req.PlayerID)
 		return c.JSON(partialState)
 	})
 
-	// User history endpoints
+	// User history
 	api.Get("/users/:id/history", func(c *fiber.Ctx) error {
 		userID, err := c.ParamsInt("id")
 		if err != nil {
@@ -283,7 +355,7 @@ func main() {
 		return c.JSON(stats)
 	})
 
-	// Leaderboard endpoints
+	// Leaderboard
 	api.Get("/leaderboard/wins", func(c *fiber.Ctx) error {
 		limit := c.QueryInt("limit", 10)
 		stats, err := leaderboardManager.GetTopByWins(int64(limit))
@@ -302,7 +374,7 @@ func main() {
 		return c.JSON(stats)
 	})
 
-	// Matchmaking endpoints
+	// Matchmaking
 	api.Post("/matchmaking/join", func(c *fiber.Ctx) error {
 		userID := c.Locals("user_id").(uint)
 		username := c.Locals("username").(string)
@@ -323,6 +395,7 @@ func main() {
 
 		size, _ := matchmakingQueue.GetQueueSize()
 		metrics.PlayersInQueue.Set(float64(size))
+		logger.Info().Uint("user_id", userID).Msg("Player joined matchmaking queue")
 
 		return c.JSON(fiber.Map{"status": "joined", "queue_size": size})
 	})
@@ -340,8 +413,11 @@ func main() {
 
 		return c.JSON(fiber.Map{"status": "left"})
 	})
+}
 
-	// Admin endpoints
+func setupAdminRoutes(api fiber.Router, adminMiddleware *middleware.AdminMiddleware, 
+	roomManager *rooms.Manager, authService *auth.Service) {
+	
 	admin := api.Group("/admin", adminMiddleware.RequireAdmin())
 
 	admin.Get("/rooms", func(c *fiber.Ctx) error {
@@ -353,8 +429,7 @@ func main() {
 	})
 
 	admin.Post("/ban", func(c *fiber.Ctx) error {
-		adminUser := c.Locals("admin_user")
-		adminID := adminUser.(*auth.Service).(*auth.Service)
+		adminID := c.Locals("user_id").(uint)
 
 		var req struct {
 			UserID    uint   `json:"user_id"`
@@ -371,6 +446,7 @@ func main() {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		logger.Info().Uint("admin_id", adminID).Uint("user_id", req.UserID).Str("reason", req.Reason).Msg("User banned")
 		return c.JSON(fiber.Map{"status": "user banned"})
 	})
 
@@ -388,10 +464,14 @@ func main() {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		logger.Info().Uint("user_id", req.UserID).Msg("User unbanned")
 		return c.JSON(fiber.Map{"status": "user unbanned"})
 	})
+}
 
-	// WebSocket endpoint
+func setupWebSocketRoute(app *fiber.App, hub *websocket.Hub, roomManager *rooms.Manager, 
+	rateLimiter *middleware.RateLimiter) {
+	
 	app.Use("/ws", rateLimiter.WebSocketLimit(5))
 	app.Use("/ws", func(c *fiber.Ctx) error {
 		if ws.IsWebSocketUpgrade(c) {
@@ -422,21 +502,12 @@ func main() {
 		}
 
 		hub.Register <- client
+		logger.Info().Uint("user_id", uid).Str("username", username).Str("room_id", roomID).Msg("WebSocket connected")
 
 		go client.WritePump()
 		client.ReadPump()
 
-		// Cleanup
 		rateLimiter.DecrementWSConnection(userID)
+		logger.Info().Uint("user_id", uid).Msg("WebSocket disconnected")
 	}))
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	log.Printf("Server starting on port %s", port)
-	if err := app.Listen(":" + port); err != nil {
-		log.Fatal(err)
-	}
 }

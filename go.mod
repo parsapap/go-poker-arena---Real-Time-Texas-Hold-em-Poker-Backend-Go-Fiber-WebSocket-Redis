@@ -10,6 +10,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.18.0
 	github.com/redis/go-redis/v9 v9.4.0
+	github.com/rs/zerolog v1.31.0
 	golang.org/x/crypto v0.17.0
 	gorm.io/driver/postgres v1.5.4
 	gorm.io/gorm v1.25.5
