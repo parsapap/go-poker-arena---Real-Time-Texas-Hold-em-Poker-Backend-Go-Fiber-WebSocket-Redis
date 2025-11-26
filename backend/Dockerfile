@@ -31,9 +31,6 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 # Copy binary
 COPY --from=builder /poker-server /poker-server
 
-# Copy env file
-COPY .env.example /.env
-
 EXPOSE 8080
 
 ENTRYPOINT ["/poker-server"]
