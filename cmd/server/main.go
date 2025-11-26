@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"go-poker-arena/internal/database"
+	"go-poker-arena/internal/poker"
 	"go-poker-arena/internal/rooms"
 	"go-poker-arena/internal/websocket"
 	"github.com/gofiber/fiber/v2"
@@ -89,6 +90,44 @@ func main() {
 		return c.Status(201).JSON(room)
 	})
 
+	app.Post("/rooms/:id/start", func(c *fiber.Ctx) error {
+		roomID, err := c.ParamsInt("id")
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid room ID"})
+		}
+
+		game, err := roomManager.StartGame(uint(roomID))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(game)
+	})
+
+	app.Post("/rooms/:id/action", func(c *fiber.Ctx) error {
+		roomID, err := c.ParamsInt("id")
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid room ID"})
+		}
+
+		var req struct {
+			PlayerID uint   `json:"player_id"`
+			Action   string `json:"action"`
+			Amount   int64  `json:"amount"`
+		}
+
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		err = roomManager.ProcessAction(uint(roomID), req.PlayerID, poker.Action(req.Action), req.Amount)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"status": "ok"})
+	})
+
 	app.Use("/ws", func(c *fiber.Ctx) error {
 		if ws.IsWebSocketUpgrade(c) {
 			return c.Next()
@@ -105,12 +144,13 @@ func main() {
 		fmt.Sscanf(userID, "%d", &uid)
 
 		client := &websocket.Client{
-			Hub:      hub,
-			Conn:     c,
-			Send:     make(chan []byte, 256),
-			UserID:   uid,
-			Username: username,
-			RoomID:   roomID,
+			Hub:         hub,
+			Conn:        c,
+			Send:        make(chan []byte, 256),
+			UserID:      uid,
+			Username:    username,
+			RoomID:      roomID,
+			RoomManager: roomManager,
 		}
 
 		hub.Register <- client
