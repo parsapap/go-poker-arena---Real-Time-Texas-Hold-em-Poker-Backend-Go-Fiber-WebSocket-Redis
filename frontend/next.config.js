@@ -1,15 +1,17 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  output: 'standalone',
   async rewrites() {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:8080/:path*',
+        destination: `${apiUrl}/:path*`,
       },
       {
         source: '/ws',
-        destination: 'http://localhost:8080/ws',
+        destination: `${apiUrl}/ws`,
       },
     ]
   },
