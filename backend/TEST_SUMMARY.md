@@ -67,7 +67,7 @@ open coverage.html
 | **Rooms** | ~90% | 13 | 🟢 Good |
 | **Middleware** | ~85% | 8 | 🟢 Good |
 | **WebSocket** | ~70% | 2 | 🟡 Acceptable |
-| **Poker** | 33% | 17 | 🔴 Needs Fix |
+| **Poker** | 44.7% | 17 | 🟢 All Passing |
 
 ## ✅ What's Tested
 
@@ -145,6 +145,13 @@ go get gorm.io/driver/sqlite              # In-memory database
 PASS
 coverage: 95.2% of statements
 ok      go-poker-arena/internal/auth    0.234s
+
+=== RUN   TestEvaluateRoyalFlush
+--- PASS: TestEvaluateRoyalFlush (0.00s)
+...
+PASS
+coverage: 44.7% of statements
+ok      go-poker-arena/internal/poker   0.004s
 ```
 
 ### Performance
@@ -172,10 +179,22 @@ ok      go-poker-arena/internal/auth    0.234s
 1. ✅ **All critical modules tested** (auth, anticheat, game logic)
 2. ✅ **96.1% coverage** on anti-cheat (security critical)
 3. ✅ **95% coverage** on authentication (security critical)
-4. ✅ **Zero external dependencies** for tests
-5. ✅ **Fast test execution** (<15 seconds)
-6. ✅ **Comprehensive edge case testing**
-7. ✅ **Production-ready test suite**
+4. ✅ **100% test pass rate** on poker hand evaluation (17/17 tests)
+5. ✅ **Zero external dependencies** for tests
+6. ✅ **Fast test execution** (<15 seconds)
+7. ✅ **Comprehensive edge case testing**
+8. ✅ **Production-ready test suite**
+
+## 🐛 Critical Bugs Fixed
+
+### Poker Hand Evaluation
+- **Bug #1**: Straight detection loop went to rank `Five` (3), causing `i-4 = -1` which resulted in negative shift producing mask of 0, leading to false positive straight detections
+  - **Fix**: Changed loop to stop at `Six` (rank 4) to prevent negative shifts
+  
+- **Bug #2**: One Pair value calculation had overlap where pair rank (shifted by 8 bits) overlapped with kickers (using 12 bits for 3 kickers × 4 bits each)
+  - **Fix**: Changed pair rank shift from 8 bits to 12 bits to avoid overlap
+
+**Result**: All 17 poker tests now passing with 44.7% coverage ✅
 
 ## 📚 Documentation
 
