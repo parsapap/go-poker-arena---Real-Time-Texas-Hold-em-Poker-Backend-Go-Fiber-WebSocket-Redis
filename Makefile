@@ -1,4 +1,4 @@
-.PHONY: help build run docker-up docker-down test test-coverage load-test clean
+.PHONY: help build run docker-up docker-down test test-coverage load-test stress-test clean
 
 help:
 	@echo "Available commands:"
@@ -9,6 +9,7 @@ help:
 	@echo "  make test          - Run all tests"
 	@echo "  make test-coverage - Run tests with coverage report"
 	@echo "  make load-test     - Run WebSocket load test with 100 connections"
+	@echo "  make stress-test   - Run stress test with 1000 connections"
 	@echo "  make clean         - Clean build artifacts"
 
 build:
@@ -38,6 +39,12 @@ load-test:
 	cd test && go mod init test 2>/dev/null || true
 	cd test && go get github.com/gorilla/websocket
 	cd test && go run ws_load_test.go
+
+stress-test:
+	@echo "Building stress test with 1000 connections..."
+	cd test && go mod init test 2>/dev/null || true
+	cd test && go get github.com/gorilla/websocket
+	cd test && go run stress_test.go
 
 clean:
 	rm -rf bin/

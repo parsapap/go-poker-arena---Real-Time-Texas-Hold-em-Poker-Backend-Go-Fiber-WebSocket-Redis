@@ -5,10 +5,17 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
+
 	"go-poker-arena/internal/database"
+	"go-poker-arena/internal/leaderboard"
+	"go-poker-arena/internal/matchmaking"
+	"go-poker-arena/internal/metrics"
+	"go-poker-arena/internal/middleware"
 	"go-poker-arena/internal/poker"
 	"go-poker-arena/internal/rooms"
 	"go-poker-arena/internal/websocket"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -47,6 +54,12 @@ func main() {
 	go hub.Run()
 
 	roomManager := rooms.NewManager(db, redisClient)
+	leaderboardManager := leaderboard.NewLeaderboard(redisClient)
+	matchmakingQueue := matchmaking.NewQueue(redisClient)
+	rateLimiter := middleware.NewRateLimiter(redisClient)
+
+	// Start auto-matchmaking worker
+	go matchmakingQueue.AutoMatchWorker(10*time.Second, roomManager)
 
 	app := fiber.New(fiber.Config{
 		AppName: "Go Poker Arena",
@@ -54,23 +67,30 @@ func main() {
 
 	app.Use(logger.New())
 	app.Use(cors.New())
+	app.Use(metrics.MetricsMiddleware())
 
 	app.Get("/healthz", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
-			"status": "ok",
+			"status":  "ok",
 			"service": "go-poker-arena",
 		})
 	})
 
-	app.Get("/rooms", func(c *fiber.Ctx) error {
+	app.Get("/metrics", metrics.MetricsHandler())
+
+	// API routes with rate limiting
+	api := app.Group("/api", rateLimiter.Limit(100, 1*time.Minute))
+
+	api.Get("/rooms", func(c *fiber.Ctx) error {
 		rooms, err := roomManager.ListRooms()
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
+		metrics.ActiveRooms.Set(float64(len(rooms)))
 		return c.JSON(rooms)
 	})
 
-	app.Post("/rooms", func(c *fiber.Ctx) error {
+	api.Post("/rooms", func(c *fiber.Ctx) error {
 		var req struct {
 			Name       string `json:"name"`
 			MaxPlayers int    `json:"max_players"`
@@ -87,10 +107,11 @@ func main() {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		metrics.ActiveRooms.Inc()
 		return c.Status(201).JSON(room)
 	})
 
-	app.Post("/rooms/:id/start", func(c *fiber.Ctx) error {
+	api.Post("/rooms/:id/start", func(c *fiber.Ctx) error {
 		roomID, err := c.ParamsInt("id")
 		if err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid room ID"})
@@ -101,10 +122,13 @@ func main() {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		metrics.GamesTotal.Inc()
+		metrics.ActiveGames.Inc()
+		metrics.HandsDealt.Inc()
 		return c.JSON(game)
 	})
 
-	app.Post("/rooms/:id/action", func(c *fiber.Ctx) error {
+	api.Post("/rooms/:id/action", func(c *fiber.Ctx) error {
 		roomID, err := c.ParamsInt("id")
 		if err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid room ID"})
@@ -128,6 +152,112 @@ func main() {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
 
+	// Leaderboard endpoints
+	api.Get("/leaderboard/wins", func(c *fiber.Ctx) error {
+		limit := c.QueryInt("limit", 10)
+		stats, err := leaderboardManager.GetTopByWins(int64(limit))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(stats)
+	})
+
+	api.Get("/leaderboard/chips", func(c *fiber.Ctx) error {
+		limit := c.QueryInt("limit", 10)
+		stats, err := leaderboardManager.GetTopByChips(int64(limit))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(stats)
+	})
+
+	api.Get("/leaderboard/player/:id", func(c *fiber.Ctx) error {
+		playerID, err := c.ParamsInt("id")
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid player ID"})
+		}
+		stats, err := leaderboardManager.GetPlayerStats(uint(playerID))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(stats)
+	})
+
+	// Matchmaking endpoints
+	api.Post("/matchmaking/join", func(c *fiber.Ctx) error {
+		var req struct {
+			UserID    uint   `json:"user_id"`
+			Username  string `json:"username"`
+			Chips     int64  `json:"chips"`
+			SkillRank int64  `json:"skill_rank"`
+		}
+
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		err := matchmakingQueue.JoinQueue(req.UserID, req.Username, req.Chips, req.SkillRank)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		size, _ := matchmakingQueue.GetQueueSize()
+		metrics.PlayersInQueue.Set(float64(size))
+
+		return c.JSON(fiber.Map{"status": "joined", "queue_size": size})
+	})
+
+	api.Post("/matchmaking/leave", func(c *fiber.Ctx) error {
+		var req struct {
+			UserID uint `json:"user_id"`
+		}
+
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		err := matchmakingQueue.LeaveQueue(req.UserID)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		size, _ := matchmakingQueue.GetQueueSize()
+		metrics.PlayersInQueue.Set(float64(size))
+
+		return c.JSON(fiber.Map{"status": "left"})
+	})
+
+	api.Get("/matchmaking/status", func(c *fiber.Ctx) error {
+		size, err := matchmakingQueue.GetQueueSize()
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"queue_size": size})
+	})
+
+	// Auth endpoints
+	api.Post("/auth/login", func(c *fiber.Ctx) error {
+		var req struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
+
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		// TODO: Validate credentials against database
+		// For now, generate token for any user
+		token, err := middleware.GenerateToken(1, req.Username)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to generate token"})
+		}
+
+		return c.JSON(fiber.Map{"token": token})
+	})
+
+	// WebSocket endpoint
+	app.Use("/ws", rateLimiter.WebSocketLimit(5))
 	app.Use("/ws", func(c *fiber.Ctx) error {
 		if ws.IsWebSocketUpgrade(c) {
 			return c.Next()
@@ -136,6 +266,9 @@ func main() {
 	})
 
 	app.Get("/ws", ws.New(func(c *ws.Conn) {
+		metrics.WebSocketConnections.Inc()
+		defer metrics.WebSocketConnections.Dec()
+
 		userID := c.Query("user_id", "0")
 		username := c.Query("username", "guest")
 		roomID := c.Query("room_id", "")
@@ -157,6 +290,9 @@ func main() {
 
 		go client.WritePump()
 		client.ReadPump()
+
+		// Cleanup
+		rateLimiter.DecrementWSConnection(userID)
 	}))
 
 	port := os.Getenv("PORT")
