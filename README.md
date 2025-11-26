@@ -1,46 +1,64 @@
-# Go Poker Arena
+# Go Poker Arena 🃏
 
-Production-ready Texas Hold'em Poker backend with real-time features, matchmaking, leaderboards, and metrics.
+Production-ready Texas Hold'em Poker backend with real-time features, matchmaking, leaderboards, comprehensive security, and anti-cheat measures.
 
-## Features
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Security](https://img.shields.io/badge/Security-Hardened-green.svg)](SECURITY.md)
+
+## 🚀 Features
 
 ### Core Poker Engine
-- ✓ Complete Texas Hold'em implementation
-- ✓ All game phases: Pre-flop, Flop, Turn, River, Showdown
-- ✓ Betting actions: Fold, Check, Call, Raise, All-in
-- ✓ Pot management with automatic side pots
-- ✓ Fast hand evaluator using bitmasks
-- ✓ Cryptographically secure deck shuffling
+- ✅ Complete Texas Hold'em implementation
+- ✅ All game phases: Pre-flop, Flop, Turn, River, Showdown
+- ✅ Betting actions: Fold, Check, Call, Raise, All-in
+- ✅ Pot management with automatic side pots
+- ✅ Fast hand evaluator using bitmasks
+- ✅ Cryptographically secure deck shuffling
+
+### Security & Anti-Cheat
+- ✅ **JWT Authentication** with bcrypt password hashing
+- ✅ **Latency validation** (max 5s, detects network manipulation)
+- ✅ **Action rate limiting** (prevents bot behavior)
+- ✅ **Bet validation** (prevents invalid actions)
+- ✅ **Card hiding** (opponents' cards hidden until showdown)
+- ✅ **Collusion detection** (pattern analysis)
+- ✅ **Game history logging** (all actions saved to PostgreSQL)
 
 ### Real-Time Features
-- ✓ WebSocket connections for live gameplay
-- ✓ Redis pub/sub for room updates
-- ✓ Broadcast player actions to room
-- ✓ Live pot and community card updates
-- ✓ Hidden opponent cards (revealed at showdown)
+- ✅ WebSocket connections for live gameplay
+- ✅ Redis pub/sub for room updates
+- ✅ Broadcast player actions to room
+- ✅ Live pot and community card updates
+- ✅ Partial game state (security-focused)
 
 ### Matchmaking System
-- ✓ Auto-matchmaking queue by skill/chips
-- ✓ Redis sorted sets for efficient matching
-- ✓ Automatic room creation and game start
-- ✓ Queue position tracking
+- ✅ Auto-matchmaking queue by skill/chips
+- ✅ Redis sorted sets for efficient matching
+- ✅ Automatic room creation and game start
+- ✅ Queue position tracking
 
 ### Leaderboard
-- ✓ Redis sorted sets for rankings
-- ✓ Top players by wins
-- ✓ Top players by chips
-- ✓ Individual player stats and rank
+- ✅ Redis sorted sets for rankings
+- ✅ Top players by wins
+- ✅ Top players by chips
+- ✅ Individual player stats and rank
 
-### Security & Performance
-- ✓ JWT authentication
-- ✓ Rate limiting (100 req/min per user)
-- ✓ WebSocket connection limits (5 per user)
-- ✓ Prometheus metrics endpoint
-- ✓ Stress tested with 1000+ concurrent connections
+### Admin Features
+- ✅ Admin-only endpoints
+- ✅ User ban/unban system
+- ✅ Ban records with reasons
+- ✅ Room monitoring
 
-## Tech Stack
+### Performance & Monitoring
+- ✅ Prometheus metrics endpoint
+- ✅ Rate limiting (100 req/min per user)
+- ✅ WebSocket connection limits (5 per user)
+- ✅ Stress tested with 1000+ concurrent connections
 
-- **Go 1.21+**
+## 🛠 Tech Stack
+
+- **Go 1.21+** - Backend language
 - **Fiber v2** - Web framework
 - **WebSocket** - Real-time communication
 - **GORM** - ORM for PostgreSQL
@@ -48,9 +66,10 @@ Production-ready Texas Hold'em Poker backend with real-time features, matchmakin
 - **PostgreSQL** - Database
 - **Prometheus** - Metrics
 - **JWT** - Authentication
+- **bcrypt** - Password hashing
 - **Docker** - Containerization
 
-## Quick Start
+## 📦 Quick Start
 
 ### Prerequisites
 
@@ -60,6 +79,11 @@ Production-ready Texas Hold'em Poker backend with real-time features, matchmakin
 ### Installation
 
 1. Clone the repository
+```bash
+git clone https://github.com/parsapap/go-poker-arena.git
+cd go-poker-arena
+```
+
 2. Copy environment variables:
 ```bash
 cp .env.example .env
@@ -82,49 +106,94 @@ make run
 
 The server will start on `http://localhost:8080`
 
-## API Endpoints
-
-### Health & Metrics
-- `GET /healthz` - Health check
-- `GET /metrics` - Prometheus metrics
-
-### Rooms
-- `GET /api/rooms` - List all rooms
-- `POST /api/rooms` - Create a new room
-- `POST /api/rooms/:id/start` - Start game in room
-- `POST /api/rooms/:id/action` - Process player action
-
-### Leaderboard
-- `GET /api/leaderboard/wins?limit=10` - Top players by wins
-- `GET /api/leaderboard/chips?limit=10` - Top players by chips
-- `GET /api/leaderboard/player/:id` - Player stats
-
-### Matchmaking
-- `POST /api/matchmaking/join` - Join matchmaking queue
-- `POST /api/matchmaking/leave` - Leave matchmaking queue
-- `GET /api/matchmaking/status` - Queue status
+## 🔐 Security Features
 
 ### Authentication
-- `POST /api/auth/login` - Login and get JWT token
+- Signup with email verification
+- Login with bcrypt password verification
+- JWT tokens with 24-hour expiration
+- Automatic IP tracking
 
-### WebSocket
-- `GET /ws?user_id=1&username=player1&room_id=room1` - WebSocket connection
+### Anti-Cheat
+- **Latency Checks**: Max 5000ms, detects manipulation
+- **Rate Limiting**: Max 60 actions/min, min 100ms interval
+- **Bet Validation**: Validates amounts and player state
+- **Card Hiding**: Partial game state sent to clients
+- **Action Logging**: All actions saved with timestamps
 
-## Prometheus Metrics
+### Admin Controls
+- Ban/unban users
+- View all rooms
+- Access to game history
+- Audit trail
+
+See [SECURITY.md](SECURITY.md) for complete security documentation.
+
+## 📚 API Documentation
+
+See [API.md](API.md) for complete API reference.
+
+### Quick Examples
+
+#### Signup
+```bash
+curl -X POST http://localhost:8080/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "player1",
+    "email": "player1@example.com",
+    "password": "securepass123"
+  }'
+```
+
+#### Login
+```bash
+curl -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "player1",
+    "password": "securepass123"
+  }'
+```
+
+#### Create Room
+```bash
+curl -X POST http://localhost:8080/api/rooms \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "High Stakes",
+    "max_players": 9,
+    "small_blind": 10,
+    "big_blind": 20
+  }'
+```
+
+## 🎮 Game Flow
+
+1. **Signup/Login** → Get JWT token
+2. **Join Matchmaking** → Auto-matched with players
+3. **Room Created** → Game starts automatically
+4. **Blinds Posted** → Small/big blinds deducted
+5. **Cards Dealt** → 2 hole cards per player
+6. **Betting Rounds** → Pre-flop, Flop, Turn, River
+7. **Showdown** → Best hand wins
+8. **Chips Distributed** → Winner gets pot
+9. **History Saved** → Game logged to database
+10. **Leaderboard Updated** → Rankings refreshed
+
+## 📊 Prometheus Metrics
 
 Available at `/metrics`:
 
 - `http_requests_total` - Total HTTP requests
 - `http_request_duration_seconds` - Request duration
 - `websocket_connections_active` - Active WebSocket connections
-- `websocket_messages_total` - Total WebSocket messages
 - `poker_games_active` - Active games
-- `poker_games_total` - Total games started
 - `poker_hands_dealt_total` - Total hands dealt
-- `poker_rooms_active` - Active rooms
 - `matchmaking_queue_size` - Players in queue
 
-## Testing
+## 🧪 Testing
 
 ### Run Unit Tests
 ```bash
@@ -146,105 +215,107 @@ make load-test
 make stress-test
 ```
 
-## Rate Limiting
+## 🐳 Docker Deployment
 
-- **API Endpoints**: 100 requests per minute per user
-- **WebSocket**: Maximum 5 concurrent connections per user
-
-## WebSocket Message Format
-
-### Client → Server
-```json
-{
-  "type": "action",
-  "room_id": "1",
-  "payload": {
-    "action": "raise",
-    "amount": 100
-  }
-}
-```
-
-### Server → Client
-```json
-{
-  "type": "player_action",
-  "room_id": 1,
-  "player_id": 1,
-  "username": "player1",
-  "action": "raise",
-  "amount": 100,
-  "game": {...}
-}
-```
-
-## Docker Commands
-
+### Multi-Stage Build
 ```bash
-# Start services
-make docker-up
-
-# Stop services
-make docker-down
-
-# Clean everything
-make clean
+docker build -t poker-arena .
+docker run -p 8080:8080 --env-file .env poker-arena
 ```
 
-## Project Structure
+### Docker Compose
+```bash
+docker-compose up -d
+```
+
+## 📁 Project Structure
 
 ```
 go-poker-arena/
-├── cmd/
-│   └── server/
-│       └── main.go              # Application entry point
+├── cmd/server/              # Application entry point
 ├── internal/
-│   ├── database/
-│   │   └── database.go          # Database connection
-│   ├── leaderboard/
-│   │   └── leaderboard.go       # Redis leaderboard
-│   ├── matchmaking/
-│   │   └── queue.go             # Matchmaking queue
-│   ├── metrics/
-│   │   └── metrics.go           # Prometheus metrics
-│   ├── middleware/
-│   │   ├── jwt.go               # JWT authentication
-│   │   └── ratelimit.go         # Rate limiting
-│   ├── models/
-│   │   ├── user.go              # User model
-│   │   ├── room.go              # Room model
-│   │   └── game.go              # Game model
-│   ├── poker/
-│   │   ├── deck.go              # Deck management
-│   │   ├── hand.go              # Hand evaluator
-│   │   ├── game.go              # Game logic
-│   │   └── hand_test.go         # Unit tests
-│   ├── rooms/
-│   │   └── manager.go           # Room management
-│   └── websocket/
-│       ├── hub.go               # WebSocket hub
-│       └── client.go            # WebSocket client
-├── test/
-│   ├── ws_load_test.go          # Load testing
-│   └── stress_test.go           # Stress testing
-├── docker-compose.yml           # Docker services
-├── Dockerfile                   # Application container
-├── Makefile                     # Build commands
-└── .env                         # Environment variables
+│   ├── anticheat/          # Anti-cheat validation
+│   ├── auth/               # Authentication service
+│   ├── database/           # Database connection
+│   ├── history/            # Game history service
+│   ├── leaderboard/        # Redis leaderboard
+│   ├── matchmaking/        # Matchmaking queue
+│   ├── metrics/            # Prometheus metrics
+│   ├── middleware/         # JWT, rate limiting, admin
+│   ├── models/             # Data models
+│   ├── poker/              # Game engine
+│   ├── rooms/              # Room management
+│   └── websocket/          # WebSocket hub
+├── test/                   # Load & stress tests
+├── docker-compose.yml      # Infrastructure
+├── Dockerfile              # Multi-stage build
+├── API.md                  # API documentation
+├── SECURITY.md             # Security documentation
+└── FEATURES.md             # Feature list
 ```
 
-## Environment Variables
+## 🔧 Configuration
 
-See `.env.example` for all available configuration options.
+### Environment Variables
 
-## Performance
+```env
+PORT=8080
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=poker
+POSTGRES_PASSWORD=poker123
+POSTGRES_DB=poker_arena
+REDIS_HOST=localhost
+REDIS_PORT=6379
+JWT_SECRET=your-secret-key-change-in-production
+ALLOWED_ORIGINS=https://yourdomain.com
+```
+
+## 🚦 Rate Limits
+
+- **API Endpoints**: 100 requests per minute per user
+- **WebSocket**: Maximum 5 concurrent connections per user
+- **Actions**: Max 60 per minute, min 100ms interval
+
+## 📈 Performance
 
 Tested with:
-- ✓ 1000+ concurrent WebSocket connections
-- ✓ 100 simultaneous games
-- ✓ Sub-millisecond hand evaluation
-- ✓ Redis pub/sub for distributed scaling
+- ✅ 1000+ concurrent WebSocket connections
+- ✅ 100 simultaneous games
+- ✅ Sub-millisecond hand evaluation
+- ✅ Redis pub/sub for distributed scaling
 
-## License
+## 🤝 Contributing
 
-MIT
+Contributions are welcome! Please read our contributing guidelines first.
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🔒 Security
+
+For security vulnerabilities, please email: security@poker-arena.com
+
+Do not create public GitHub issues for security vulnerabilities.
+
+## 📞 Support
+
+- Documentation: [API.md](API.md), [SECURITY.md](SECURITY.md)
+- Issues: [GitHub Issues](https://github.com/parsapap/go-poker-arena/issues)
+- Discussions: [GitHub Discussions](https://github.com/parsapap/go-poker-arena/discussions)
+
+## 🎯 Roadmap
+
+- [ ] Tournament mode
+- [ ] Sit & Go tables
+- [ ] Multi-table support
+- [ ] Player avatars
+- [ ] Chat system
+- [ ] Replay system
+- [ ] Mobile app support
+- [ ] Cryptocurrency integration
+
+---
+
+**Built with ❤️ using Go and Fiber**
