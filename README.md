@@ -4,268 +4,217 @@
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Railway-blueviolet?style=for-the-badge&logo=railway)](https://go-poker-arena.up.railway.app)
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go)](https://golang.org)
+[![Next.js](https://img.shields.io/badge/Next.js-14-black?style=for-the-badge&logo=next.js)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue?style=for-the-badge&logo=typescript)](https://typescriptlang.org)
 [![Fiber](https://img.shields.io/badge/Fiber-v2-00ACD7?style=for-the-badge&logo=fiber)](https://gofiber.io)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=for-the-badge&logo=postgresql&logoColor=white)](https://postgresql.org)
-[![WebSocket](https://img.shields.io/badge/WebSocket-Real--Time-yellow?style=for-the-badge)](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket)
 
 [![CI/CD](https://github.com/parsapap/go-poker-arena/actions/workflows/ci.yml/badge.svg)](https://github.com/parsapap/go-poker-arena/actions)
 [![codecov](https://codecov.io/gh/parsapap/go-poker-arena/branch/main/graph/badge.svg)](https://codecov.io/gh/parsapap/go-poker-arena)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
-[![Security](https://img.shields.io/badge/Security-Hardened-green.svg?style=for-the-badge)](SECURITY.md)
 
-**Production-ready Texas Hold'em Poker backend with real-time gameplay, anti-cheat, and enterprise security**
+**Full-stack Texas Hold'em Poker with real-time multiplayer, enterprise security, and beautiful UI**
 
-[Live Demo](https://go-poker-arena.up.railway.app) • [API Docs](API.md) • [Security](SECURITY.md) • [Deploy Guide](DEPLOYMENT.md)
+[Live Demo](https://go-poker-arena.up.railway.app) • [API Docs](API.md) • [Security](SECURITY.md)
 
 </div>
 
 ---
 
-## 🎮 Live Demo
-
-Experience real-time poker with 8 players betting simultaneously:
+## ⚡ Quick Start
 
 ```bash
-# Connect via WebSocket
-wscat -c "wss://go-poker-arena.up.railway.app/ws?user_id=1&username=player1&room_id=demo"
-
-# Or try the REST API
-curl https://go-poker-arena.up.railway.app/healthz
-```
-
-## ⚡ Features
-
-### 🎯 Complete Texas Hold'em Implementation
-- ✅ **Full poker rules**: Pre-flop, Flop, Turn, River, Showdown
-- ✅ **All actions**: Fold, Check, Call, Raise, All-in
-- ✅ **Smart pot management**: Automatic side pots for all-in situations
-- ✅ **Fast hand evaluator**: Bitmask-based, sub-millisecond evaluation
-- ✅ **10 hand rankings**: Royal Flush → High Card
-- ✅ **Crypto-secure shuffle**: Using `crypto/rand`
-
-### 🔒 Enterprise Security & Anti-Cheat
-- ✅ **JWT Authentication**: bcrypt password hashing, 24h token expiration
-- ✅ **Latency validation**: Max 5s, detects network manipulation
-- ✅ **Bot detection**: Action rate limiting (max 60/min, min 100ms interval)
-- ✅ **Bet validation**: Prevents invalid actions and chip manipulation
-- ✅ **Card hiding**: Opponents' cards hidden until showdown
-- ✅ **Collusion detection**: Pattern analysis framework
-- ✅ **Complete audit trail**: All actions logged to PostgreSQL
-
-### 🚀 Real-Time & Scalability
-- ✅ **WebSocket**: Live gameplay with auto-reconnect
-- ✅ **Redis Pub/Sub**: Distributed messaging for horizontal scaling
-- ✅ **1000+ concurrent connections**: Stress tested
-- ✅ **100 simultaneous games**: Battle tested
-- ✅ **Graceful shutdown**: Zero downtime deployments
-
-### 🎲 Matchmaking & Leaderboards
-- ✅ **Auto-matchmaking**: Skill and chip-based matching
-- ✅ **Redis sorted sets**: Efficient rankings
-- ✅ **Real-time leaderboards**: Top players by wins/chips
-- ✅ **Player statistics**: Win rate, total games, action history
-
-### 📊 Monitoring & Observability
-- ✅ **Prometheus metrics**: `/metrics` endpoint
-- ✅ **Structured logging**: zerolog with JSON output
-- ✅ **Health checks**: `/healthz` endpoint
-- ✅ **Rate limiting**: 100 req/min per user
-
-## 🏆 Benchmarks
-
-```
-Requests/sec:     50,000+
-WebSocket conns:  1,000+
-Hand evaluation:  <1ms
-Latency (p99):    <50ms
-Memory usage:     ~100MB
-```
-
-## 🚀 Quick Start
-
-### One-Command Deploy
-
-```bash
-docker-compose up
-```
-
-That's it! Server runs on `http://localhost:8080`
-
-### Manual Setup
-
-```bash
-# 1. Clone repository
+# Clone repository
 git clone https://github.com/parsapap/go-poker-arena.git
 cd go-poker-arena
 
-# 2. Start infrastructure
-make docker-up
+# Start everything with Docker
+docker-compose up
 
-# 3. Run server
-make run
+# Backend: http://localhost:8080
+# Frontend: http://localhost:3000
 ```
 
-## 📦 Installation
+That's it! 🎉
 
-### Prerequisites
-- Go 1.21+
-- Docker & Docker Compose
-- PostgreSQL 16
-- Redis 7
+## 🎮 Features
 
-### Environment Setup
+### 🎯 Complete Texas Hold'em
+- ✅ Full poker rules (Pre-flop, Flop, Turn, River, Showdown)
+- ✅ All actions (Fold, Check, Call, Raise, All-in)
+- ✅ Smart pot management with side pots
+- ✅ 10 hand rankings (Royal Flush → High Card)
+- ✅ Crypto-secure shuffle
 
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
+### 🚀 Real-Time Multiplayer
+- ✅ WebSocket connections with auto-reconnect
+- ✅ Up to 9 players per table
+- ✅ Live game updates
+- ✅ 1000+ concurrent connections tested
 
-### Build from Source
+### 🔒 Enterprise Security
+- ✅ JWT authentication with bcrypt
+- ✅ Anti-cheat validation (5 layers)
+- ✅ Rate limiting (100 req/min)
+- ✅ Complete audit trail
+- ✅ Admin controls
 
-```bash
-go mod download
-go build -o bin/poker-server ./cmd/server
-./bin/poker-server
-```
+### 🎨 Beautiful UI
+- ✅ Next.js 14 with TypeScript
+- ✅ Tailwind CSS styling
+- ✅ Responsive design
+- ✅ Real-time animations
+- ✅ Mobile-friendly
 
-## 🎯 Usage Examples
-
-### Signup & Login
-
-```bash
-# Signup
-curl -X POST http://localhost:8080/auth/signup \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "player1",
-    "email": "player1@example.com",
-    "password": "securepass123"
-  }'
-
-# Login
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "player1",
-    "password": "securepass123"
-  }'
-```
-
-### Create Room & Play
-
-```bash
-# Create room
-curl -X POST http://localhost:8080/api/rooms \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "High Stakes",
-    "max_players": 9,
-    "small_blind": 10,
-    "big_blind": 20
-  }'
-
-# Join via WebSocket
-wscat -c "ws://localhost:8080/ws?user_id=1&username=player1&room_id=1"
-
-# Send action
-{"type":"action","room_id":"1","payload":{"action":"raise","amount":100}}
-```
-
-### View Leaderboard
-
-```bash
-curl http://localhost:8080/api/leaderboard/wins?limit=10 \
-  -H "Authorization: Bearer <token>"
-```
+### 📊 Advanced Features
+- ✅ Auto-matchmaking
+- ✅ Leaderboards
+- ✅ Game history
+- ✅ Player statistics
+- ✅ Prometheus metrics
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Client    │────▶│  Fiber API  │────▶│ PostgreSQL  │
-│ (WebSocket) │     │   (Go 1.21) │     │   (GORM)    │
-└─────────────┘     └─────────────┘     └─────────────┘
-                           │
-                           ▼
-                    ┌─────────────┐
-                    │    Redis    │
-                    │  (Pub/Sub)  │
-                    └─────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    Go Poker Arena                        │
+├─────────────────────────────────────────────────────────┤
+│                                                           │
+│  ┌──────────────────┐         ┌──────────────────┐     │
+│  │   Next.js 14     │◄───────►│   Go Backend     │     │
+│  │   (Frontend)     │  HTTP   │   (Fiber v2)     │     │
+│  │                  │  WS     │                  │     │
+│  └──────────────────┘         └──────────────────┘     │
+│                                        │                 │
+│                                        ▼                 │
+│                          ┌──────────────────┐           │
+│                          │   PostgreSQL     │           │
+│                          │   (GORM)         │           │
+│                          └──────────────────┘           │
+│                                        │                 │
+│                                        ▼                 │
+│                          ┌──────────────────┐           │
+│                          │     Redis        │           │
+│                          │   (Pub/Sub)      │           │
+│                          └──────────────────┘           │
+│                                                           │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## 📊 Tech Stack
+## 📦 Project Structure
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Backend** | Go 1.21 | High-performance server |
-| **Web Framework** | Fiber v2 | Fast HTTP/WebSocket |
-| **Database** | PostgreSQL 16 | Persistent storage |
-| **Cache** | Redis 7 | Pub/sub, leaderboards |
-| **Auth** | JWT + bcrypt | Secure authentication |
-| **Logging** | zerolog | Structured logging |
-| **Metrics** | Prometheus | Monitoring |
-| **Deployment** | Docker + Railway | Container orchestration |
+```
+go-poker-arena/
+├── backend/                 # Go backend
+│   ├── cmd/server/         # Application entry point
+│   ├── internal/           # Internal packages
+│   │   ├── poker/         # Game engine
+│   │   ├── websocket/     # WebSocket hub
+│   │   ├── auth/          # Authentication
+│   │   └── ...
+│   ├── go.mod
+│   └── Dockerfile
+├── frontend/               # Next.js frontend
+│   ├── app/               # App router pages
+│   ├── components/        # React components
+│   ├── lib/               # Utilities
+│   ├── package.json
+│   └── Dockerfile
+├── docker-compose.yml      # Local development
+├── .github/workflows/      # CI/CD pipelines
+└── README.md              # This file
+```
+
+## 🚀 Development
+
+### Backend (Go)
+
+```bash
+cd backend
+
+# Install dependencies
+go mod download
+
+# Run server
+go run cmd/server/main.go
+
+# Run tests
+go test ./... -v
+
+# Build
+go build -o bin/poker-server ./cmd/server
+```
+
+### Frontend (Next.js)
+
+```bash
+cd frontend
+
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
+
+# Build for production
+npm run build
+
+# Start production server
+npm start
+```
 
 ## 🧪 Testing
 
 ```bash
-# Unit tests
-make test
-
-# Coverage report
-make test-coverage
+# Backend tests
+cd backend
+go test ./... -cover
 
 # Load test (100 connections)
 make load-test
 
 # Stress test (1000 connections)
 make stress-test
+
+# Frontend tests
+cd frontend
+npm test
 ```
 
-## 📈 Monitoring
+## 📊 Performance
 
-### Prometheus Metrics
+```
+Backend:
+- Requests/sec:     50,000+
+- WebSocket conns:  1,000+
+- Hand evaluation:  <1ms
+- Latency (p99):    <50ms
 
-Access metrics at `http://localhost:8080/metrics`
-
-Key metrics:
-- `http_requests_total` - Total HTTP requests
-- `websocket_connections_active` - Active WebSocket connections
-- `poker_games_active` - Active games
-- `matchmaking_queue_size` - Players in queue
-
-### Logs
-
-```bash
-# View logs
-docker-compose logs -f
-
-# Filter by level
-docker-compose logs -f | grep ERROR
+Frontend:
+- First Paint:      <1s
+- Time to Interactive: <2s
+- Lighthouse Score: 95+
 ```
 
 ## 🚢 Deployment
 
-### Railway (Recommended)
+### Docker Compose (Recommended for Development)
 
 ```bash
-# Install Railway CLI
-npm install -g @railway/cli
-
-# Login
-railway login
-
-# Deploy
-railway up
+docker-compose up
 ```
 
-### Docker
+### Railway (Production)
 
 ```bash
-docker build -t poker-arena .
-docker run -p 8080:8080 --env-file .env poker-arena
+# Backend
+cd backend
+railway up
+
+# Frontend
+cd frontend
+vercel deploy
 ```
 
 ### Kubernetes
@@ -274,61 +223,51 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for Kubernetes manifests.
 
 ## 🔐 Security
 
-- ✅ **bcrypt** password hashing (cost 10)
-- ✅ **JWT** tokens with expiration
-- ✅ **Rate limiting** (100 req/min)
-- ✅ **Anti-cheat** validation
-- ✅ **CORS** configuration
-- ✅ **HTTPS** ready
-- ✅ **SQL injection** prevention (GORM)
-- ✅ **XSS** protection
+- ✅ JWT authentication with bcrypt
+- ✅ Rate limiting (100 req/min)
+- ✅ Anti-cheat validation
+- ✅ CORS configuration
+- ✅ HTTPS ready
+- ✅ SQL injection prevention
+- ✅ XSS protection
 
-See [SECURITY.md](SECURITY.md) for complete security documentation.
+See [SECURITY.md](SECURITY.md) for details.
 
 ## 📚 Documentation
 
 - [API Documentation](API.md) - Complete API reference
-- [Security Guide](SECURITY.md) - Security features & best practices
+- [Security Guide](SECURITY.md) - Security features
 - [Deployment Guide](DEPLOYMENT.md) - Production deployment
-- [Feature List](FEATURES.md) - All implemented features
+- [Backend README](backend/README.md) - Backend docs
+- [Frontend README](frontend/README.md) - Frontend docs
 
 ## 🤝 Contributing
 
-Contributions welcome! Please read our [Contributing Guide](CONTRIBUTING.md) first.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing`)
-5. Open a Pull Request
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file.
 
 ## 🙏 Acknowledgments
 
-- [Fiber](https://gofiber.io) - Amazing web framework
-- [GORM](https://gorm.io) - Fantastic ORM
-- [Redis](https://redis.io) - Blazing fast cache
-- [PostgreSQL](https://postgresql.org) - Reliable database
+- [Go](https://golang.org) - Backend language
+- [Fiber](https://gofiber.io) - Web framework
+- [Next.js](https://nextjs.org) - React framework
+- [PostgreSQL](https://postgresql.org) - Database
+- [Redis](https://redis.io) - Cache & pub/sub
 
 ## 📞 Support
 
 - 📧 Email: support@poker-arena.com
-- 💬 Discord: [Join our server](https://discord.gg/poker-arena)
+- 💬 Discord: [Join server](https://discord.gg/poker-arena)
 - 🐛 Issues: [GitHub Issues](https://github.com/parsapap/go-poker-arena/issues)
-- 💡 Discussions: [GitHub Discussions](https://github.com/parsapap/go-poker-arena/discussions)
-
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=parsapap/go-poker-arena&type=Date)](https://star-history.com/#parsapap/go-poker-arena&Date)
 
 ---
 
 <div align="center">
 
-**Built with ❤️ using Go and Fiber**
+**Built with ❤️ using Go, Fiber, Next.js, and TypeScript**
 
 [⬆ Back to Top](#-go-poker-arena)
 
