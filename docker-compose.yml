@@ -72,13 +72,18 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8080
-      NEXT_PUBLIC_WS_URL: ws://localhost:8080
+      NEXT_PUBLIC_API_URL: http://backend:8080
+      NEXT_PUBLIC_WS_URL: ws://backend:8080
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
     depends_on:
       - backend
     networks:
       - poker-network
     restart: unless-stopped
+    command: npm run dev
 
 volumes:
   postgres_data:

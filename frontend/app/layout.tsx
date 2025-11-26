@@ -1,11 +1,15 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
 
-const inter = Inter({ subsets: ['latin'] })
+const ibmPlexMono = IBM_Plex_Mono({ 
+  weight: ['400', '500', '600', '700'],
+  subsets: ['latin'],
+  variable: '--font-geist-mono',
+})
 
 export const metadata: Metadata = {
-  title: 'Go Poker Arena - Real-Time Texas Hold\'em',
+  title: 'Poker Arena - Real-Time Texas Hold\'em',
   description: 'Play Texas Hold\'em poker online with real-time multiplayer gameplay',
 }
 
@@ -15,8 +19,10 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>{children}</body>
+    <html lang="en" className="dark">
+      <body className={`${ibmPlexMono.variable} font-mono bg-black text-white antialiased`}>
+        {children}
+      </body>
     </html>
   )
 }
