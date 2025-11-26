@@ -53,11 +53,11 @@ export default function LoginPage() {
             key={i}
             className="absolute w-1 h-1 bg-white/20 rounded-full"
             initial={{
-              x: Math.random() * window.innerWidth,
-              y: Math.random() * window.innerHeight,
+              x: typeof window !== 'undefined' ? Math.random() * window.innerWidth : Math.random() * 1000,
+              y: typeof window !== 'undefined' ? Math.random() * window.innerHeight : Math.random() * 1000,
             }}
             animate={{
-              y: [null, Math.random() * window.innerHeight],
+              y: [null, typeof window !== 'undefined' ? Math.random() * window.innerHeight : Math.random() * 1000],
               opacity: [0, 1, 0],
             }}
             transition={{
@@ -89,7 +89,7 @@ export default function LoginPage() {
             🃏
           </motion.div>
           <h1 className="text-4xl font-bold tracking-tight mb-2">POKER ARENA</h1>
-          <p className="text-white/60">Real-Time Texas Hold'em</p>
+          <p className="text-white/60">Real-Time Texas Hold&apos;em</p>
         </motion.div>
 
         {/* Login Form */}
@@ -173,7 +173,7 @@ export default function LoginPage() {
 
           <div className="mt-6 text-center">
             <p className="text-white/60">
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Link href="/register" className="text-white hover:underline font-medium">
                 Register
               </Link>
