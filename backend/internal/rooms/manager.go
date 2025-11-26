@@ -121,7 +121,7 @@ func (m *Manager) GetRoomPlayers(roomID uint) ([]uint, error) {
 	return playerIDs, nil
 }
 
-func (m *Manager) StartGame(roomID uint) (*poker.Game, error) {
+func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
 	room, err := m.GetRoom(roomID)
 	if err != nil {
 		return nil, err
@@ -182,10 +182,10 @@ func (m *Manager) StartGame(roomID uint) (*poker.Game, error) {
 	})
 	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), gameData)
 
-	return game, nil
+	return room, nil
 }
 
-func (m *Manager) GetGame(roomID uint) (*poker.Game, error) {
+func (m *Manager) GetGame(roomID uint) (interface{}, error) {
 	game, ok := m.Games[roomID]
 	if !ok {
 		return nil, fmt.Errorf("game not found for room %d", roomID)
@@ -193,13 +193,18 @@ func (m *Manager) GetGame(roomID uint) (*poker.Game, error) {
 	return game, nil
 }
 
-func (m *Manager) ProcessAction(roomID, playerID uint, action poker.Action, amount int64) error {
-	game, err := m.GetGame(roomID)
+func (m *Manager) ProcessAction(roomID, playerID uint, action string, amount int64) error {
+	gameInterface, err := m.GetGame(roomID)
 	if err != nil {
 		return err
 	}
 
-	if err := game.ProcessAction(playerID, action, amount); err != nil {
+	game, ok := gameInterface.(*poker.Game)
+	if !ok {
+		return fmt.Errorf("invalid game type")
+	}
+
+	if err := game.ProcessAction(playerID, poker.Action(action), amount); err != nil {
 		return err
 	}
 
@@ -219,9 +224,14 @@ func (m *Manager) ProcessAction(roomID, playerID uint, action poker.Action, amou
 }
 
 func (m *Manager) DealCards(roomID uint) error {
-	game, err := m.GetGame(roomID)
+	gameInterface, err := m.GetGame(roomID)
 	if err != nil {
 		return err
+	}
+
+	game, ok := gameInterface.(*poker.Game)
+	if !ok {
+		return fmt.Errorf("invalid game type")
 	}
 
 	ctx := context.Background()
@@ -237,9 +247,14 @@ func (m *Manager) DealCards(roomID uint) error {
 }
 
 func (m *Manager) EndRound(roomID uint) error {
-	game, err := m.GetGame(roomID)
+	gameInterface, err := m.GetGame(roomID)
 	if err != nil {
 		return err
+	}
+
+	game, ok := gameInterface.(*poker.Game)
+	if !ok {
+		return fmt.Errorf("invalid game type")
 	}
 
 	// Update player chips in database

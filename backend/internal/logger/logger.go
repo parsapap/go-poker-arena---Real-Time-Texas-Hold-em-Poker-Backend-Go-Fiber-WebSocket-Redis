@@ -4,7 +4,6 @@ import (
 	"os"
 	"time"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog"
 )
 
 var Log zerolog.Logger

@@ -316,7 +316,7 @@ func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService
 
 		historyService.SaveAction(pokerGame.ID, req.PlayerID, req.Action, req.Amount, string(pokerGame.Phase), req.Latency)
 
-		err = roomManager.ProcessAction(uint(roomID), req.PlayerID, poker.Action(req.Action), req.Amount)
+		err = roomManager.ProcessAction(uint(roomID), req.PlayerID, req.Action, req.Amount)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}

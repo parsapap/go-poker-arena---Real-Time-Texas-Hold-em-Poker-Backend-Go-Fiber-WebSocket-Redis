@@ -139,7 +139,7 @@ func (q *Queue) GetQueuePosition(userID uint) (int64, error) {
 func (q *Queue) AutoMatchWorker(interval time.Duration, roomManager interface {
 	CreateRoom(name string, maxPlayers int, smallBlind, bigBlind int64) (*models.Room, error)
 	JoinRoom(roomID, userID uint) error
-	StartGame(roomID uint) (interface{}, error)
+	StartGame(roomID uint) (*models.Room, error)
 }) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

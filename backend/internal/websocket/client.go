@@ -23,8 +23,7 @@ type Client struct {
 	Username    string
 	RoomID      string
 	RoomManager interface {
-		ProcessAction(roomID, playerID uint, action interface{}, amount int64) error
-		GetGame(roomID uint) (interface{}, error)
+		ProcessAction(roomID, playerID uint, action string, amount int64) error
 	}
 }
 
