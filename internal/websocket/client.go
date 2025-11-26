@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 	"github.com/gofiber/websocket/v2"
@@ -15,12 +16,16 @@ const (
 )
 
 type Client struct {
-	Hub      *Hub
-	Conn     *websocket.Conn
-	Send     chan []byte
-	UserID   uint
-	Username string
-	RoomID   string
+	Hub         *Hub
+	Conn        *websocket.Conn
+	Send        chan []byte
+	UserID      uint
+	Username    string
+	RoomID      string
+	RoomManager interface {
+		ProcessAction(roomID, playerID uint, action interface{}, amount int64) error
+		GetGame(roomID uint) (interface{}, error)
+	}
 }
 
 type Message struct {
@@ -60,6 +65,24 @@ func (c *Client) ReadPump() {
 
 		msg.UserID = c.UserID
 		msg.Username = c.Username
+
+		// Handle game actions
+		if msg.Type == "action" && c.RoomManager != nil {
+			var roomID uint
+			fmt.Sscanf(c.RoomID, "%d", &roomID)
+			
+			if payload, ok := msg.Payload.(map[string]interface{}); ok {
+				action := payload["action"].(string)
+				amount := int64(0)
+				if amt, ok := payload["amount"].(float64); ok {
+					amount = int64(amt)
+				}
+				
+				if err := c.RoomManager.ProcessAction(roomID, c.UserID, action, amount); err != nil {
+					log.Printf("error processing action: %v", err)
+				}
+			}
+		}
 
 		c.Hub.Broadcast <- &msg
 	}
