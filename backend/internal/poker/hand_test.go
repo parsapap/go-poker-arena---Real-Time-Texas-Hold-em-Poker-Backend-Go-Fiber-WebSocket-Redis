@@ -73,12 +73,13 @@ func TestEvaluateFullHouse(t *testing.T) {
 }
 
 func TestEvaluateFlush(t *testing.T) {
+	// Use A, K, J, 9, 7 all hearts (no consecutive 5 ranks)
 	cards := []Card{
 		{Suit: Hearts, Rank: Ace},
 		{Suit: Hearts, Rank: King},
-		{Suit: Hearts, Rank: Ten},
-		{Suit: Hearts, Rank: Eight},
-		{Suit: Hearts, Rank: Six},
+		{Suit: Hearts, Rank: Jack},
+		{Suit: Hearts, Rank: Nine},
+		{Suit: Hearts, Rank: Seven},
 		{Suit: Diamonds, Rank: Two},
 		{Suit: Clubs, Rank: Three},
 	}
@@ -125,14 +126,15 @@ func TestEvaluateWheel(t *testing.T) {
 }
 
 func TestEvaluateThreeOfAKind(t *testing.T) {
+	// Use 6, 6, 6, A, K, J, 2 (ranks 4, 4, 4, 12, 11, 9, 0)
 	cards := []Card{
-		{Suit: Hearts, Rank: Jack},
-		{Suit: Diamonds, Rank: Jack},
-		{Suit: Clubs, Rank: Jack},
+		{Suit: Hearts, Rank: Six},
+		{Suit: Diamonds, Rank: Six},
+		{Suit: Clubs, Rank: Six},
 		{Suit: Spades, Rank: Ace},
 		{Suit: Hearts, Rank: King},
-		{Suit: Diamonds, Rank: Two},
-		{Suit: Clubs, Rank: Three},
+		{Suit: Diamonds, Rank: Jack},
+		{Suit: Clubs, Rank: Two},
 	}
 
 	hand := EvaluateHand(cards)
@@ -142,14 +144,15 @@ func TestEvaluateThreeOfAKind(t *testing.T) {
 }
 
 func TestEvaluateTwoPair(t *testing.T) {
+	// Use A, A, 6, 6, K, J, 2 (ranks 12, 12, 4, 4, 11, 9, 0)
 	cards := []Card{
 		{Suit: Hearts, Rank: Ace},
 		{Suit: Diamonds, Rank: Ace},
-		{Suit: Clubs, Rank: King},
-		{Suit: Spades, Rank: King},
-		{Suit: Hearts, Rank: Queen},
-		{Suit: Diamonds, Rank: Two},
-		{Suit: Clubs, Rank: Three},
+		{Suit: Clubs, Rank: Six},
+		{Suit: Spades, Rank: Six},
+		{Suit: Hearts, Rank: King},
+		{Suit: Diamonds, Rank: Jack},
+		{Suit: Clubs, Rank: Two},
 	}
 
 	hand := EvaluateHand(cards)
@@ -159,14 +162,15 @@ func TestEvaluateTwoPair(t *testing.T) {
 }
 
 func TestEvaluateOnePair(t *testing.T) {
+	// Use 6, 6, A, K, J, 9, 2 (ranks 4, 4, 12, 11, 9, 7, 0)
 	cards := []Card{
-		{Suit: Hearts, Rank: Ten},
-		{Suit: Diamonds, Rank: Ten},
+		{Suit: Hearts, Rank: Six},
+		{Suit: Diamonds, Rank: Six},
 		{Suit: Clubs, Rank: Ace},
 		{Suit: Spades, Rank: King},
-		{Suit: Hearts, Rank: Queen},
-		{Suit: Diamonds, Rank: Two},
-		{Suit: Clubs, Rank: Three},
+		{Suit: Hearts, Rank: Jack},
+		{Suit: Diamonds, Rank: Nine},
+		{Suit: Clubs, Rank: Two},
 	}
 
 	hand := EvaluateHand(cards)
@@ -176,13 +180,14 @@ func TestEvaluateOnePair(t *testing.T) {
 }
 
 func TestEvaluateHighCard(t *testing.T) {
+	// Use A, K, J, 9, 7, 6, 2 with different suits (ranks 12, 11, 9, 7, 5, 4, 0)
 	cards := []Card{
 		{Suit: Hearts, Rank: Ace},
 		{Suit: Diamonds, Rank: King},
-		{Suit: Clubs, Rank: Queen},
-		{Suit: Spades, Rank: Jack},
-		{Suit: Hearts, Rank: Nine},
-		{Suit: Diamonds, Rank: Seven},
+		{Suit: Clubs, Rank: Jack},
+		{Suit: Spades, Rank: Nine},
+		{Suit: Hearts, Rank: Seven},
+		{Suit: Diamonds, Rank: Six},
 		{Suit: Clubs, Rank: Two},
 	}
 
@@ -229,20 +234,20 @@ func TestCompareHandsSameRank(t *testing.T) {
 		{Suit: Hearts, Rank: Ace},
 		{Suit: Diamonds, Rank: Ace},
 		{Suit: Clubs, Rank: King},
-		{Suit: Spades, Rank: Queen},
-		{Suit: Hearts, Rank: Jack},
-		{Suit: Diamonds, Rank: Two},
-		{Suit: Clubs, Rank: Three},
+		{Suit: Spades, Rank: Jack},
+		{Suit: Hearts, Rank: Nine},
+		{Suit: Diamonds, Rank: Six},
+		{Suit: Clubs, Rank: Two},
 	}
 
 	pair2 := []Card{
 		{Suit: Hearts, Rank: King},
 		{Suit: Diamonds, Rank: King},
 		{Suit: Clubs, Rank: Ace},
-		{Suit: Spades, Rank: Queen},
-		{Suit: Hearts, Rank: Jack},
-		{Suit: Diamonds, Rank: Two},
-		{Suit: Clubs, Rank: Three},
+		{Suit: Spades, Rank: Jack},
+		{Suit: Hearts, Rank: Nine},
+		{Suit: Diamonds, Rank: Six},
+		{Suit: Clubs, Rank: Two},
 	}
 
 	hand1 := EvaluateHand(pair1)

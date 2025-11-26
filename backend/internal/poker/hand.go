@@ -144,7 +144,7 @@ func evaluateFiveCards(cards []Card) *Hand {
 	if len(pairs) == 1 {
 		hand.Rank = OnePair
 		kickers := getKickers(rankCounts, pairs[0], 3)
-		hand.Value = (uint32(OnePair) << 20) | (uint32(pairs[0]) << 8) | kickers
+		hand.Value = (uint32(OnePair) << 20) | (uint32(pairs[0]) << 12) | kickers
 		return hand
 	}
 
@@ -160,8 +160,9 @@ func checkStraight(rankMask uint32) (bool, Rank) {
 		return true, Five
 	}
 
-	// Check for regular straights
-	for i := Ace; i >= Five; i-- {
+	// Check for regular straights (from A-K-Q-J-10 down to 9-8-7-6-5)
+	// Stop at Six (rank 4) because Five (rank 3) would cause i-4 = -1
+	for i := Ace; i >= Six; i-- {
 		mask := uint32(0x1F << uint(i-4))
 		if rankMask&mask == mask {
 			return true, i
