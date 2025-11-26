@@ -349,13 +349,17 @@ func (g *Game) isBettingRoundComplete() bool {
 	return activePlayers <= 1 || playersActed == activePlayers
 }
 
-func (g *Game) getPlayer(playerID uint) *Player {
+func (g *Game) GetPlayer(playerID uint) *Player {
 	for _, player := range g.Players {
 		if player.ID == playerID {
 			return player
 		}
 	}
 	return nil
+}
+
+func (g *Game) getPlayer(playerID uint) *Player {
+	return g.GetPlayer(playerID)
 }
 
 func min(a, b int64) int64 {

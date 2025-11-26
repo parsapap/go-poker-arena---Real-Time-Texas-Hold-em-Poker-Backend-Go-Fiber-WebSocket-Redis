@@ -7,7 +7,10 @@ import (
 	"os"
 	"time"
 
+	"go-poker-arena/internal/anticheat"
+	"go-poker-arena/internal/auth"
 	"go-poker-arena/internal/database"
+	"go-poker-arena/internal/history"
 	"go-poker-arena/internal/leaderboard"
 	"go-poker-arena/internal/matchmaking"
 	"go-poker-arena/internal/metrics"
@@ -50,6 +53,7 @@ func main() {
 	}
 	log.Println("Redis connected successfully")
 
+	// Initialize services
 	hub := websocket.NewHub(redisClient)
 	go hub.Run()
 
@@ -57,6 +61,10 @@ func main() {
 	leaderboardManager := leaderboard.NewLeaderboard(redisClient)
 	matchmakingQueue := matchmaking.NewQueue(redisClient)
 	rateLimiter := middleware.NewRateLimiter(redisClient)
+	authService := auth.NewService(db)
+	historyService := history.NewService(db)
+	adminMiddleware := middleware.NewAdminMiddleware(db)
+	anticheatValidator := anticheat.NewValidator()
 
 	// Start auto-matchmaking worker
 	go matchmakingQueue.AutoMatchWorker(10*time.Second, roomManager)
@@ -65,8 +73,15 @@ func main() {
 		AppName: "Go Poker Arena",
 	})
 
+	// CORS configuration for HTTPS
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     os.Getenv("ALLOWED_ORIGINS"),
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
+		AllowCredentials: true,
+	}))
+
 	app.Use(logger.New())
-	app.Use(cors.New())
 	app.Use(metrics.MetricsMiddleware())
 
 	app.Get("/healthz", func(c *fiber.Ctx) error {
@@ -78,9 +93,70 @@ func main() {
 
 	app.Get("/metrics", metrics.MetricsHandler())
 
-	// API routes with rate limiting
-	api := app.Group("/api", rateLimiter.Limit(100, 1*time.Minute))
+	// Public auth endpoints
+	app.Post("/auth/signup", func(c *fiber.Ctx) error {
+		var req struct {
+			Username string `json:"username"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
 
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		user, err := authService.Signup(req.Username, req.Email, req.Password)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		token, err := middleware.GenerateToken(user.ID, user.Username)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to generate token"})
+		}
+
+		return c.Status(201).JSON(fiber.Map{
+			"user":  user,
+			"token": token,
+		})
+	})
+
+	app.Post("/auth/login", func(c *fiber.Ctx) error {
+		var req struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
+
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		user, err := authService.Login(req.Username, req.Password)
+		if err != nil {
+			return c.Status(401).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Update last IP
+		user.LastIP = c.IP()
+		authService.UpdateUser(user)
+
+		token, err := middleware.GenerateToken(user.ID, user.Username)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to generate token"})
+		}
+
+		return c.JSON(fiber.Map{
+			"user":  user,
+			"token": token,
+		})
+	})
+
+	// Protected API routes
+	api := app.Group("/api", rateLimiter.Limit(100, 1*time.Minute))
+	api.Use(middleware.JWTAuth())
+	api.Use(adminMiddleware.CheckBanned())
+
+	// Room endpoints
 	api.Get("/rooms", func(c *fiber.Ctx) error {
 		rooms, err := roomManager.ListRooms()
 		if err != nil {
@@ -138,18 +214,73 @@ func main() {
 			PlayerID uint   `json:"player_id"`
 			Action   string `json:"action"`
 			Amount   int64  `json:"amount"`
+			Latency  int    `json:"latency"`
 		}
 
 		if err := c.BodyParser(&req); err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
 		}
 
+		// Anti-cheat validation
+		if err := anticheatValidator.CheckLatency(req.Latency); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		game, err := roomManager.GetGame(uint(roomID))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		pokerGame, ok := game.(*poker.Game)
+		if !ok {
+			return c.Status(500).JSON(fiber.Map{"error": "Invalid game type"})
+		}
+
+		if err := anticheatValidator.ValidateAction(req.PlayerID, poker.Action(req.Action), req.Amount, pokerGame); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Save action to history
+		historyService.SaveAction(pokerGame.ID, req.PlayerID, req.Action, req.Amount, string(pokerGame.Phase), req.Latency)
+
 		err = roomManager.ProcessAction(uint(roomID), req.PlayerID, poker.Action(req.Action), req.Amount)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		return c.JSON(fiber.Map{"status": "ok"})
+		// Return partial game state (hidden opponent cards)
+		partialState := anticheat.GetPartialGameState(pokerGame, req.PlayerID)
+		return c.JSON(partialState)
+	})
+
+	// User history endpoints
+	api.Get("/users/:id/history", func(c *fiber.Ctx) error {
+		userID, err := c.ParamsInt("id")
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+		}
+
+		limit := c.QueryInt("limit", 20)
+		history, err := historyService.GetUserHistory(uint(userID), limit)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(history)
+	})
+
+	api.Get("/users/:id/stats", func(c *fiber.Ctx) error {
+		userID, err := c.ParamsInt("id")
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+		}
+
+		stats, err := historyService.GetPlayerStats(uint(userID))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(stats)
 	})
 
 	// Leaderboard endpoints
@@ -171,32 +302,21 @@ func main() {
 		return c.JSON(stats)
 	})
 
-	api.Get("/leaderboard/player/:id", func(c *fiber.Ctx) error {
-		playerID, err := c.ParamsInt("id")
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid player ID"})
-		}
-		stats, err := leaderboardManager.GetPlayerStats(uint(playerID))
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-		return c.JSON(stats)
-	})
-
 	// Matchmaking endpoints
 	api.Post("/matchmaking/join", func(c *fiber.Ctx) error {
+		userID := c.Locals("user_id").(uint)
+		username := c.Locals("username").(string)
+
 		var req struct {
-			UserID    uint   `json:"user_id"`
-			Username  string `json:"username"`
-			Chips     int64  `json:"chips"`
-			SkillRank int64  `json:"skill_rank"`
+			Chips     int64 `json:"chips"`
+			SkillRank int64 `json:"skill_rank"`
 		}
 
 		if err := c.BodyParser(&req); err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
 		}
 
-		err := matchmakingQueue.JoinQueue(req.UserID, req.Username, req.Chips, req.SkillRank)
+		err := matchmakingQueue.JoinQueue(userID, username, req.Chips, req.SkillRank)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -208,15 +328,9 @@ func main() {
 	})
 
 	api.Post("/matchmaking/leave", func(c *fiber.Ctx) error {
-		var req struct {
-			UserID uint `json:"user_id"`
-		}
+		userID := c.Locals("user_id").(uint)
 
-		if err := c.BodyParser(&req); err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
-		}
-
-		err := matchmakingQueue.LeaveQueue(req.UserID)
+		err := matchmakingQueue.LeaveQueue(userID)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -227,33 +341,54 @@ func main() {
 		return c.JSON(fiber.Map{"status": "left"})
 	})
 
-	api.Get("/matchmaking/status", func(c *fiber.Ctx) error {
-		size, err := matchmakingQueue.GetQueueSize()
+	// Admin endpoints
+	admin := api.Group("/admin", adminMiddleware.RequireAdmin())
+
+	admin.Get("/rooms", func(c *fiber.Ctx) error {
+		rooms, err := roomManager.ListRooms()
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
-		return c.JSON(fiber.Map{"queue_size": size})
+		return c.JSON(rooms)
 	})
 
-	// Auth endpoints
-	api.Post("/auth/login", func(c *fiber.Ctx) error {
+	admin.Post("/ban", func(c *fiber.Ctx) error {
+		adminUser := c.Locals("admin_user")
+		adminID := adminUser.(*auth.Service).(*auth.Service)
+
 		var req struct {
-			Username string `json:"username"`
-			Password string `json:"password"`
+			UserID    uint   `json:"user_id"`
+			Reason    string `json:"reason"`
+			Permanent bool   `json:"permanent"`
 		}
 
 		if err := c.BodyParser(&req); err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
 		}
 
-		// TODO: Validate credentials against database
-		// For now, generate token for any user
-		token, err := middleware.GenerateToken(1, req.Username)
+		err := authService.BanUser(req.UserID, adminID, req.Reason, req.Permanent)
 		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": "Failed to generate token"})
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		return c.JSON(fiber.Map{"token": token})
+		return c.JSON(fiber.Map{"status": "user banned"})
+	})
+
+	admin.Post("/unban", func(c *fiber.Ctx) error {
+		var req struct {
+			UserID uint `json:"user_id"`
+		}
+
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		err := authService.UnbanUser(req.UserID)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"status": "user unbanned"})
 	})
 
 	// WebSocket endpoint

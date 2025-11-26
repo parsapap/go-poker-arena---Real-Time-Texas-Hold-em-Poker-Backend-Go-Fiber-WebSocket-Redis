@@ -33,5 +33,8 @@ func Migrate(db *gorm.DB) error {
 		&models.User{},
 		&models.Room{},
 		&models.Game{},
+		&models.GameHistory{},
+		&models.PlayerAction{},
+		&models.BanRecord{},
 	)
 }
