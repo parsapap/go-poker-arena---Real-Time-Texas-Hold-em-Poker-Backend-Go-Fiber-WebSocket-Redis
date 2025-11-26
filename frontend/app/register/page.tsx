@@ -123,6 +123,7 @@ export default function RegisterPage() {
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:outline-none glow-border-focus"
                 placeholder="Choose a username"
+                autoComplete="username"
                 required
               />
             </div>
@@ -137,6 +138,7 @@ export default function RegisterPage() {
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:outline-none glow-border-focus"
                 placeholder="your@email.com"
+                autoComplete="email"
                 required
               />
             </div>
@@ -152,6 +154,7 @@ export default function RegisterPage() {
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:outline-none glow-border-focus pr-12"
                   placeholder="Create a strong password"
+                  autoComplete="new-password"
                   required
                   minLength={6}
                 />

@@ -122,6 +122,7 @@ export default function LoginPage() {
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:outline-none glow-border-focus"
                 placeholder="Enter your username"
+                autoComplete="username"
                 required
               />
             </div>
@@ -137,6 +138,7 @@ export default function LoginPage() {
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:outline-none glow-border-focus pr-12"
                   placeholder="Enter your password"
+                  autoComplete="current-password"
                   required
                 />
                 <button

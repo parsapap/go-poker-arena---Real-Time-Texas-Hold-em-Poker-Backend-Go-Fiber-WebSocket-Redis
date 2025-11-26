@@ -1,15 +1,42 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useState, useCallback } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
-import { Plus, Users, TrendingUp } from 'lucide-react'
+import CreateRoomModal from '@/components/CreateRoomModal'
+import RoomTable from '@/components/RoomTable'
+import RoomSkeleton from '@/components/RoomSkeleton'
+import { Users, TrendingUp, Zap, Coins } from 'lucide-react'
+
+interface User {
+  id: number
+  username: string
+  chips: number
+  wins: number
+  losses: number
+}
+
+interface Room {
+  id: number
+  name: string
+  small_blind: number
+  big_blind: number
+  max_players: number
+  status: string
+  player_count?: number
+}
 
 export default function LobbyPage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
-  const [rooms, setRooms] = useState([])
+  const [user, setUser] = useState<User | null>(null)
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [loading, setLoading] = useState(true)
+  const [activePlayers, setActivePlayers] = useState(0)
+  const [ws, setWs] = useState<WebSocket | null>(null)
+
+  // Animated chip counter
+  const [displayChips, setDisplayChips] = useState(0)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -20,12 +47,88 @@ export default function LobbyPage() {
 
     const userData = localStorage.getItem('user')
     if (userData) {
-      setUser(JSON.parse(userData))
+      const parsedUser = JSON.parse(userData)
+      setUser(parsedUser)
+      setDisplayChips(parsedUser.chips)
     }
 
-    // Fetch rooms
     fetchRooms()
+    setupWebSocket()
+
+    // Refresh rooms every 10 seconds
+    const interval = setInterval(fetchRooms, 10000)
+
+    return () => {
+      clearInterval(interval)
+      if (ws) ws.close()
+    }
   }, [router])
+
+  // Animate chip counter
+  useEffect(() => {
+    if (user && displayChips !== user.chips) {
+      const diff = user.chips - displayChips
+      const steps = 20
+      const increment = diff / steps
+      let current = displayChips
+
+      const timer = setInterval(() => {
+        current += increment
+        if ((increment > 0 && current >= user.chips) || (increment < 0 && current <= user.chips)) {
+          setDisplayChips(user.chips)
+          clearInterval(timer)
+        } else {
+          setDisplayChips(Math.round(current))
+        }
+      }, 30)
+
+      return () => clearInterval(timer)
+    }
+  }, [user?.chips])
+
+  const setupWebSocket = () => {
+    try {
+      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080'
+      const token = localStorage.getItem('token')
+      const userData = localStorage.getItem('user')
+      
+      if (!userData) return
+
+      const user = JSON.parse(userData)
+      const socket = new WebSocket(`${wsUrl}/ws?user_id=${user.id}&username=${user.username}&room_id=lobby`)
+
+      socket.onopen = () => {
+        console.log('WebSocket connected')
+      }
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'player_count') {
+            setActivePlayers(data.count)
+          } else if (data.type === 'room_update') {
+            fetchRooms()
+          }
+        } catch (error) {
+          console.error('WebSocket message error:', error)
+        }
+      }
+
+      socket.onerror = (error) => {
+        console.error('WebSocket error:', error)
+      }
+
+      socket.onclose = () => {
+        console.log('WebSocket disconnected')
+        // Attempt to reconnect after 5 seconds
+        setTimeout(setupWebSocket, 5000)
+      }
+
+      setWs(socket)
+    } catch (error) {
+      console.error('Failed to setup WebSocket:', error)
+    }
+  }
 
   const fetchRooms = async () => {
     try {
@@ -35,118 +138,224 @@ export default function LobbyPage() {
           'Authorization': `Bearer ${token}`,
         },
       })
-      const data = await response.json()
-      setRooms(data)
+      
+      if (response.ok) {
+        const data = await response.json()
+        setRooms(Array.isArray(data) ? data : [])
+      } else {
+        setRooms([])
+      }
     } catch (error) {
       console.error('Failed to fetch rooms:', error)
+      setRooms([])
+    } finally {
+      setLoading(false)
     }
+  }
+
+  const handleCreateRoom = async (roomData: {
+    name: string
+    small_blind: number
+    big_blind: number
+    max_players: number
+  }) => {
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch('/api/rooms', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(roomData),
+      })
+
+      if (response.ok) {
+        await fetchRooms()
+      } else {
+        throw new Error('Failed to create room')
+      }
+    } catch (error) {
+      console.error('Failed to create room:', error)
+      throw error
+    }
+  }
+
+  const handleJoinRoom = (roomId: number) => {
+    router.push(`/game/${roomId}`)
+  }
+
+  const handleQuickPlay = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch('/api/matchmaking/join', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chips: user?.chips || 1000,
+          skill_rank: 1500,
+        }),
+      })
+
+      if (response.ok) {
+        // Show matchmaking status
+        alert('Joined matchmaking queue! You will be notified when a match is found.')
+      }
+    } catch (error) {
+      console.error('Failed to join matchmaking:', error)
+    }
+  }
+
+  const calculateWinRate = () => {
+    if (!user || (user.wins + user.losses) === 0) return 0
+    return Math.round((user.wins / (user.wins + user.losses)) * 100)
   }
 
   if (!user) return null
 
   return (
     <div className="min-h-screen">
-      <Navbar chips={user?.chips || 1000} />
+      <Navbar chips={displayChips} />
 
       <main className="container mx-auto px-4 pt-24 pb-12">
-        {/* Header */}
+        {/* Header with Glow Effect */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-12"
         >
-          <h1 className="text-5xl font-bold mb-4">Welcome, {user?.username}</h1>
-          <p className="text-white/60 text-lg">Choose a table or create your own</p>
+          <motion.h1
+            className="text-6xl md:text-7xl font-bold mb-4 relative inline-block"
+            animate={{
+              textShadow: [
+                '0 0 20px rgba(255,255,255,0.5)',
+                '0 0 40px rgba(255,255,255,0.3)',
+                '0 0 20px rgba(255,255,255,0.5)',
+              ],
+            }}
+            transition={{ duration: 2, repeat: Infinity }}
+          >
+            POKER ARENA
+          </motion.h1>
+          <p className="text-white/60 text-lg">Welcome back, {user.username}</p>
         </motion.div>
+
+        {/* Animated Chip Balance */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-md mx-auto mb-8 glass glow-border rounded-2xl p-6 text-center"
+        >
+          <div className="flex items-center justify-center gap-3 mb-2">
+            <Coins className="w-6 h-6 text-yellow-400 animate-pulse" />
+            <span className="text-white/60 text-sm font-medium">Your Balance</span>
+          </div>
+          <motion.div
+            key={displayChips}
+            initial={{ scale: 1.2, color: '#fbbf24' }}
+            animate={{ scale: 1, color: '#ffffff' }}
+            className="text-5xl font-bold"
+          >
+            {displayChips.toLocaleString()}
+          </motion.div>
+          <span className="text-white/40 text-sm">chips</span>
+        </motion.div>
+
+        {/* Quick Play Button */}
+        <motion.button
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={handleQuickPlay}
+          className="w-full max-w-2xl mx-auto mb-8 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl p-6 flex items-center justify-center gap-3 hover:from-green-600 hover:to-emerald-700 transition-all shadow-lg shadow-green-500/20 relative overflow-hidden group"
+        >
+          <motion.div
+            animate={{ scale: [1, 1.2, 1] }}
+            transition={{ duration: 1.5, repeat: Infinity }}
+            className="absolute inset-0 bg-white/10"
+          />
+          <Zap className="w-6 h-6 relative z-10" />
+          <span className="text-xl font-bold relative z-10">Quick Play - Auto Matchmaking</span>
+        </motion.button>
 
         {/* Stats */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12"
+          className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8"
         >
-          <StatCard icon={<Users />} label="Active Players" value="1,234" />
-          <StatCard icon={<TrendingUp />} label="Your Wins" value={user?.wins || 0} />
-          <StatCard icon={<TrendingUp />} label="Win Rate" value="65%" />
+          <StatCard
+            icon={<Users />}
+            label="Active Players"
+            value={activePlayers || '...'}
+            pulse
+          />
+          <StatCard icon={<TrendingUp />} label="Your Wins" value={user.wins} />
+          <StatCard icon={<TrendingUp />} label="Win Rate" value={`${calculateWinRate()}%`} />
         </motion.div>
 
-        {/* Create Room Button */}
-        <motion.button
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          className="w-full glass glow-border rounded-xl p-6 mb-8 flex items-center justify-center gap-3 hover:bg-white/10 transition-all"
-        >
-          <Plus className="w-6 h-6" />
-          <span className="text-xl font-bold">Create New Room</span>
-        </motion.button>
-
-        {/* Rooms List */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {rooms.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="col-span-full text-center py-12 text-white/40"
-            >
-              No active rooms. Create one to start playing!
-            </motion.div>
-          ) : (
-            rooms.map((room: any, index) => (
-              <RoomCard key={room.id} room={room} index={index} />
-            ))
-          )}
+        {/* Create Room Modal */}
+        <div className="mb-8">
+          <CreateRoomModal onCreateRoom={handleCreateRoom} />
         </div>
+
+        {/* Rooms Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+            <span>Active Tables</span>
+            <span className="text-white/40 text-lg">({rooms.length})</span>
+          </h2>
+
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <RoomSkeleton count={6} />
+            </div>
+          ) : (
+            <RoomTable rooms={rooms} onJoinRoom={handleJoinRoom} />
+          )}
+        </motion.div>
       </main>
     </div>
   )
 }
 
-function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | number }) {
-  return (
-    <div className="glass glow-border rounded-xl p-6">
-      <div className="flex items-center gap-3 mb-2">
-        <div className="text-white/60">{icon}</div>
-        <span className="text-white/60 text-sm">{label}</span>
-      </div>
-      <div className="text-3xl font-bold">{value}</div>
-    </div>
-  )
-}
-
-function RoomCard({ room, index }: { room: any; index: number }) {
+function StatCard({
+  icon,
+  label,
+  value,
+  pulse = false,
+}: {
+  icon: React.ReactNode
+  label: string
+  value: string | number
+  pulse?: boolean
+}) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05 }}
       whileHover={{ scale: 1.02 }}
-      className="glass glow-border rounded-xl p-6 cursor-pointer hover:bg-white/10 transition-all"
+      className="glass glow-border rounded-xl p-6"
     >
-      <h3 className="text-xl font-bold mb-2">{room.name}</h3>
-      <div className="space-y-2 text-sm text-white/60">
-        <div className="flex justify-between">
-          <span>Blinds:</span>
-          <span className="text-white">{room.small_blind}/{room.big_blind}</span>
-        </div>
-        <div className="flex justify-between">
-          <span>Players:</span>
-          <span className="text-white">0/{room.max_players}</span>
-        </div>
-        <div className="flex justify-between">
-          <span>Status:</span>
-          <span className="text-green-400">{room.status}</span>
-        </div>
+      <div className="flex items-center gap-3 mb-2">
+        <div className={`text-white/60 ${pulse ? 'animate-pulse' : ''}`}>{icon}</div>
+        <span className="text-white/60 text-sm">{label}</span>
       </div>
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        className="w-full mt-4 bg-white text-black py-2 rounded-lg font-bold hover:bg-white/90 transition-all"
+      <motion.div
+        key={value}
+        initial={{ scale: 1.1 }}
+        animate={{ scale: 1 }}
+        className="text-3xl font-bold"
       >
-        Join Table
-      </motion.button>
+        {value}
+      </motion.div>
     </motion.div>
   )
 }
