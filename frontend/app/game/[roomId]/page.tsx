@@ -11,6 +11,7 @@ import { soundManager } from '@/lib/sounds'
 import { ToastContainer } from '@/components/Toast'
 import { ReconnectionOverlay, ConnectionStatus } from '@/components/ReconnectionOverlay'
 import { ChipRain } from '@/components/ChipRain'
+import type { Toast, ToastType } from '@/types/toast'
 
 export default function GamePage() {
   const params = useParams()
@@ -18,7 +19,7 @@ export default function GamePage() {
   const [user, setUser] = useState<any>(null)
   const [raiseAmount, setRaiseAmount] = useState(100)
   const [chatInput, setChatInput] = useState('')
-  const [toasts, setToasts] = useState<any[]>([])
+  const [toasts, setToasts] = useState<Toast[]>([])
   const [showChipRain, setShowChipRain] = useState(false)
 
   const {
@@ -82,13 +83,20 @@ export default function GamePage() {
     }
   }, [communityCards.length, soundEnabled])
 
-  const addToast = (type: string, message: string) => {
+  const addToast = (type: ToastType, message: string, duration?: number) => {
     const id = Date.now().toString()
-    setToasts((prev: any) => [...prev, { id, type, message }])
+    const toast: Toast = {
+      id,
+      type,
+      message,
+      duration: duration || 3000,
+      timestamp: Date.now()
+    }
+    setToasts((prev) => [...prev, toast])
   }
 
   const removeToast = (id: string) => {
-    setToasts((prev: any) => prev.filter((t: any) => t.id !== id))
+    setToasts((prev) => prev.filter((t) => t.id !== id))
   }
 
   const handleAction = (action: string, amount?: number) => {
