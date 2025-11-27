@@ -1,13 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useGameStore } from '@/store/gameStore'
-
-interface WebSocketMessage {
-  type: string
-  room_id?: string
-  user_id?: number
-  username?: string
-  payload?: any
-}
+import { getWebSocketUrl } from '@/lib/websocketUtils'
+import { cardsToStrings, type BackendCard } from '@/lib/cardUtils'
+import type { WebSocketMessage, WSMessage } from '@/types/websocket'
+import { logger } from '@/lib/logger'
 
 interface UsePokerWebSocketProps {
   roomId: string
@@ -52,14 +48,14 @@ export function usePokerWebSocket({
     if (ws.current?.readyState === WebSocket.OPEN) return
 
     try {
-      // Connect to WebSocket (proxied through Next.js)
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080'
+      // Connect to WebSocket with auto-detected URL
+      const wsUrl = getWebSocketUrl()
       const url = `${wsUrl}/ws?user_id=${userId}&username=${encodeURIComponent(username)}&room_id=${roomId}`
       
       ws.current = new WebSocket(url)
 
       ws.current.onopen = () => {
-        console.log('✅ WebSocket connected')
+        logger.ws.connected()
         setIsConnected(true)
         setIsReconnecting(false)
         reconnectAttempts.current = 0
@@ -82,7 +78,7 @@ export function usePokerWebSocket({
       }
 
       ws.current.onclose = () => {
-        console.log('❌ WebSocket disconnected')
+        logger.ws.disconnected()
         setIsConnected(false)
         clearInterval(heartbeatInterval.current)
         onDisconnect?.()
@@ -92,7 +88,7 @@ export function usePokerWebSocket({
           setIsReconnecting(true)
           reconnectAttempts.current++
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 10000)
-          console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current})`)
+          logger.ws.reconnecting(reconnectAttempts.current)
           
           reconnectTimeout.current = setTimeout(() => {
             connect()
@@ -101,8 +97,16 @@ export function usePokerWebSocket({
       }
 
       ws.current.onerror = (error) => {
-        console.error('❌ WebSocket error:', error)
+        logger.ws.error(error)
+        setIsConnected(false)
         onError?.(error)
+        
+        // Show user-friendly error
+        addChatMessage({
+          user: 'System',
+          message: 'Connection error. Attempting to reconnect...',
+          timestamp: Date.now()
+        })
       }
 
       ws.current.onmessage = (event) => {
@@ -110,16 +114,16 @@ export function usePokerWebSocket({
           const message: WebSocketMessage = JSON.parse(event.data)
           handleMessage(message)
         } catch (error) {
-          console.error('Error parsing message:', error)
+          logger.error('Error parsing WebSocket message', error)
         }
       }
     } catch (error) {
-      console.error('Error connecting to WebSocket:', error)
+      logger.error('Error connecting to WebSocket', error)
     }
   }, [roomId, userId, username, onConnect, onDisconnect, onError])
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
-    console.log('📨 Received:', message.type, message.payload)
+    logger.ws.message(message.type, message.payload)
 
     switch (message.type) {
       case 'join':
@@ -147,10 +151,17 @@ export function usePokerWebSocket({
       case 'gameState':
         // Full game state update
         if (message.payload) {
-          const { players, communityCards, pot, currentBet, phase, currentPlayer } = message.payload
+          const { players, communityCards, pot, currentBet, phase, currentPlayer, pots } = message.payload
           setPlayers(players || [])
-          setCommunityCards(communityCards || [])
-          setPot(pot || 0)
+          
+          // Convert backend cards to frontend format
+          if (communityCards && Array.isArray(communityCards)) {
+            setCommunityCards(cardsToStrings(communityCards as BackendCard[]))
+          }
+          
+          // Calculate total pot from all pots
+          const totalPot = pots ? pots.reduce((sum: number, p: any) => sum + (p.amount || 0), 0) : (pot || 0)
+          setPot(totalPot)
           setCurrentBet(currentBet || 0)
           setPhase(phase || 'waiting')
           setMyTurn(currentPlayer === userId)
@@ -160,20 +171,37 @@ export function usePokerWebSocket({
       case 'deal':
         // Cards dealt to players
         if (message.payload) {
-          const { holeCards, playerId } = message.payload
-          if (playerId === userId) {
-            setHoleCards(holeCards)
+          const { holeCards, playerId, communityCards } = message.payload
+          if (playerId === userId && holeCards) {
+            setHoleCards(cardsToStrings(holeCards as BackendCard[]))
+          }
+          if (communityCards) {
+            setCommunityCards(cardsToStrings(communityCards as BackendCard[]))
           }
         }
         break
 
+      case 'player_action':
       case 'playerAction':
         // Player made an action
         if (message.payload) {
-          const { playerId, action, amount, newPot, newBet } = message.payload
-          updatePlayer({ id: playerId, lastAction: action, bet: amount })
+          const { playerId, player_id, action, amount, newPot, newBet, pot, current_bet, game } = message.payload
+          const actualPlayerId = playerId || player_id
+          
+          updatePlayer({ id: actualPlayerId, lastAction: action, bet: amount })
+          
+          // Update pot from various possible sources
           if (newPot !== undefined) setPot(newPot)
+          else if (pot !== undefined) setPot(pot)
+          else if (game?.pots) {
+            const totalPot = game.pots.reduce((sum: number, p: any) => sum + (p.amount || 0), 0)
+            setPot(totalPot)
+          }
+          
+          // Update current bet
           if (newBet !== undefined) setCurrentBet(newBet)
+          else if (current_bet !== undefined) setCurrentBet(current_bet)
+          else if (game?.current_bet !== undefined) setCurrentBet(game.current_bet)
           
           addChatMessage({
             user: message.username || 'Player',
@@ -184,12 +212,23 @@ export function usePokerWebSocket({
         break
 
       case 'phaseChange':
+      case 'phase_change':
         // Game phase changed (flop, turn, river)
         if (message.payload) {
-          const { phase, communityCards } = message.payload
+          const { phase, communityCards, community_cards, pot, pots } = message.payload
           setPhase(phase)
-          if (communityCards) {
-            setCommunityCards(communityCards)
+          
+          const cards = communityCards || community_cards
+          if (cards && Array.isArray(cards)) {
+            setCommunityCards(cardsToStrings(cards as BackendCard[]))
+          }
+          
+          // Update pot on phase change
+          if (pots) {
+            const totalPot = pots.reduce((sum: number, p: any) => sum + (p.amount || 0), 0)
+            setPot(totalPot)
+          } else if (pot !== undefined) {
+            setPot(pot)
           }
         }
         break
@@ -242,12 +281,20 @@ export function usePokerWebSocket({
 
       case 'error':
         // Error message
-        console.error('Server error:', message.payload)
+        logger.error('Server error', message.payload)
+        const errorMsg = message.payload?.message || message.payload?.error || 'Unknown error'
         addChatMessage({
           user: 'System',
-          message: `Error: ${message.payload?.message || 'Unknown error'}`,
+          message: `⚠️ Error: ${errorMsg}`,
           timestamp: Date.now()
         })
+        
+        // Handle specific errors
+        if (errorMsg.includes('banned')) {
+          setTimeout(() => {
+            window.location.href = '/login'
+          }, 3000)
+        }
         break
 
       case 'pong':
@@ -255,15 +302,16 @@ export function usePokerWebSocket({
         break
 
       default:
-        console.log('Unknown message type:', message.type)
+        logger.warn('Unknown message type', { type: message.type, payload: message.payload })
     }
   }, [userId, setPlayers, setCommunityCards, setHoleCards, setPhase, setPot, setCurrentBet, setMyTurn, addChatMessage, setWinner, updatePlayer, removePlayer])
 
   const sendMessage = useCallback((message: WebSocketMessage) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify(message))
+      logger.debug('WebSocket message sent', { type: message.type })
     } else {
-      console.warn('WebSocket not connected, cannot send message')
+      logger.warn('WebSocket not connected, cannot send message')
     }
   }, [])
 
