@@ -47,8 +47,9 @@ func main() {
 	logger.Info().Msg("Database connected successfully")
 
 	// Run migrations
-	if err := database.Migrate(db); err != nil {
-		logger.Fatal().Err(err).Msg("Failed to migrate database")
+	autoMigrate := getEnv("AUTO_MIGRATE", "false") == "true"
+	if err := database.RunMigrations(db, autoMigrate); err != nil {
+		logger.Fatal().Err(err).Msg("Failed to run database migrations")
 	}
 	logger.Info().Msg("Database migrations completed")
 
@@ -99,7 +100,7 @@ func main() {
 	// Middleware
 	app.Use(recover.New())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     getEnv("ALLOWED_ORIGINS", "*"),
+		AllowOrigins:     getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001"),
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
 		AllowCredentials: true,
@@ -257,6 +258,39 @@ func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService
 		metrics.ActiveRooms.Inc()
 		logger.Info().Uint("room_id", room.ID).Str("name", room.Name).Msg("Room created")
 		return c.Status(201).JSON(room)
+	})
+
+	api.Post("/rooms/:id/join", func(c *fiber.Ctx) error {
+		roomID, err := c.ParamsInt("id")
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid room ID"})
+		}
+
+		userID := c.Locals("user_id").(uint)
+
+		// Check if room exists and has space
+		room, err := roomManager.GetRoom(uint(roomID))
+		if err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "Room not found"})
+		}
+
+		// Get current player count
+		players, err := roomManager.GetRoomPlayers(uint(roomID))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to check room capacity"})
+		}
+
+		if len(players) >= room.MaxPlayers {
+			return c.Status(400).JSON(fiber.Map{"error": "Room is full"})
+		}
+
+		// Join the room
+		if err := roomManager.JoinRoom(uint(roomID), userID); err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		logger.Info().Uint("user_id", userID).Uint("room_id", uint(roomID)).Msg("Player joined room")
+		return c.JSON(fiber.Map{"status": "joined", "room_id": roomID})
 	})
 
 	api.Post("/rooms/:id/start", func(c *fiber.Ctx) error {
