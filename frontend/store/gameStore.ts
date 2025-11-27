@@ -63,13 +63,12 @@ interface GameState {
   resetGame: () => void
 }
 
-export const useGameStore = create<GameState>((set) => ({
-  // Initial state
+const initialState = {
   roomId: '',
   players: [],
   communityCards: [],
   holeCards: [],
-  phase: 'waiting',
+  phase: 'waiting' as const,
   pot: 0,
   currentBet: 0,
   myTurn: false,
@@ -77,6 +76,11 @@ export const useGameStore = create<GameState>((set) => ({
   chatMessages: [],
   typingUsers: [],
   soundEnabled: true,
+}
+
+export const useGameStore = create<GameState>((set) => ({
+  // Initial state
+  ...initialState,
 
   // Actions
   setRoomId: (roomId) => set({ roomId }),
@@ -127,14 +131,5 @@ export const useGameStore = create<GameState>((set) => ({
 
   toggleSound: () => set((state) => ({ soundEnabled: !state.soundEnabled })),
 
-  resetGame: () =>
-    set({
-      communityCards: [],
-      holeCards: [],
-      phase: 'waiting',
-      pot: 0,
-      currentBet: 0,
-      myTurn: false,
-      winner: null
-    })
+  resetGame: () => set(initialState)
 }))
