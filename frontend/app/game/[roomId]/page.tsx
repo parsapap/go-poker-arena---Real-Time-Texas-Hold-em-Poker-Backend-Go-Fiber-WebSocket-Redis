@@ -11,9 +11,10 @@ import { soundManager } from '@/lib/sounds'
 import { ToastContainer } from '@/components/Toast'
 import { ReconnectionOverlay, ConnectionStatus } from '@/components/ReconnectionOverlay'
 import { ChipRain } from '@/components/ChipRain'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import type { Toast, ToastType } from '@/types/toast'
 
-export default function GamePage() {
+function GamePageContent() {
   const params = useParams()
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
@@ -36,18 +37,6 @@ export default function GamePage() {
     toggleSound
   } = useGameStore()
 
-  const { isConnected, isReconnecting, sendAction, sendChat, reconnect } = usePokerWebSocket({
-    roomId: params.roomId as string,
-    userId: user?.id || 0,
-    username: user?.username || '',
-    onConnect: () => {
-      addToast('success', 'Connected to game')
-    },
-    onDisconnect: () => {
-      addToast('error', 'Disconnected from game')
-    }
-  })
-
   useEffect(() => {
     const token = localStorage.getItem('token')
     if (!token) {
@@ -60,6 +49,20 @@ export default function GamePage() {
       setUser(JSON.parse(userData))
     }
   }, [router])
+
+  // Only initialize WebSocket after user data is loaded
+  const { isConnected, isReconnecting, sendAction, sendChat, reconnect } = usePokerWebSocket({
+    roomId: params.roomId as string,
+    userId: user?.id || 0,
+    username: user?.username || '',
+    enabled: !!user, // Only connect when user is loaded
+    onConnect: () => {
+      addToast('success', 'Connected to game')
+    },
+    onDisconnect: () => {
+      addToast('error', 'Disconnected from game')
+    }
+  })
 
   // Watch for winner and trigger celebrations
   useEffect(() => {
@@ -116,7 +119,17 @@ export default function GamePage() {
     setChatInput('')
   }
 
-  if (!user) return null
+  // Show loading state while user data is being loaded
+  if (!user) {
+    return (
+      <div className="fixed inset-0 bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-emerald-500 mx-auto mb-4"></div>
+          <p className="text-white/60">Loading game...</p>
+        </div>
+      </div>
+    )
+  }
 
   const seatPositions = [
     { x: '50%', y: '85%', transform: 'translate(-50%, -50%)' },
@@ -220,7 +233,7 @@ export default function GamePage() {
 
           {/* Community cards */}
           <div className="absolute top-[55%] left-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-3 z-10">
-            {communityCards.map((card, i) => (
+            {communityCards && communityCards.length > 0 && communityCards.map((card, i) => (
               <motion.div
                 key={i}
                 initial={{ rotateY: 180, y: -100, opacity: 0 }}
@@ -238,7 +251,8 @@ export default function GamePage() {
           </div>
 
           {/* Player seats */}
-          {players.map((player, idx) => {
+          {players && players.length > 0 && players.map((player, idx) => {
+            if (!player || !seatPositions[idx]) return null
             const pos = seatPositions[idx]
             const isEmpty = player.chips === 0
             const isYou = player.id === user?.id
@@ -344,7 +358,7 @@ export default function GamePage() {
                 </div>
                 <input
                   type="range"
-                  min={currentBet * 2}
+                  min={Math.max((currentBet || 0) * 2, 10)}
                   max={user?.chips || 5000}
                   step="50"
                   value={raiseAmount}
@@ -352,9 +366,9 @@ export default function GamePage() {
                   className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer slider"
                 />
                 <div className="flex justify-between text-xs text-white/40 mt-1">
-                  <button onClick={() => setRaiseAmount(currentBet * 2)} className="hover:text-white">2x</button>
-                  <button onClick={() => setRaiseAmount(currentBet * 3)} className="hover:text-white">3x</button>
-                  <button onClick={() => setRaiseAmount(pot)} className="hover:text-white">Pot</button>
+                  <button onClick={() => setRaiseAmount(Math.max((currentBet || 0) * 2, 20))} className="hover:text-white">2x</button>
+                  <button onClick={() => setRaiseAmount(Math.max((currentBet || 0) * 3, 30))} className="hover:text-white">3x</button>
+                  <button onClick={() => setRaiseAmount(Math.max(pot || 0, 50))} className="hover:text-white">Pot</button>
                   <button onClick={() => setRaiseAmount(user?.chips || 5000)} className="hover:text-white">All-in</button>
                 </div>
               </div>
@@ -371,10 +385,10 @@ export default function GamePage() {
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => handleAction(currentBet > 0 ? 'call' : 'check')}
+                  onClick={() => handleAction((currentBet || 0) > 0 ? 'call' : 'check')}
                   className="py-4 rounded-xl font-bold glass hover:bg-white/10 border-2 border-white/30"
                 >
-                  {currentBet > 0 ? `Call $${currentBet}` : 'Check'}
+                  {(currentBet || 0) > 0 ? `Call $${currentBet || 0}` : 'Check'}
                 </motion.button>
                 <motion.button
                   whileHover={{ scale: 1.02 }}
@@ -398,7 +412,7 @@ export default function GamePage() {
       >
         <h3 className="font-bold mb-3 text-sm text-white/60">CHAT</h3>
         <div className="flex-1 overflow-y-auto space-y-2 mb-3">
-          {chatMessages.map((msg, i) => (
+          {chatMessages && chatMessages.length > 0 && chatMessages.map((msg, i) => (
             <div key={i} className="text-sm">
               <span className="text-emerald-400 font-semibold">{msg.user}:</span>
               <span className="text-white/80 ml-2">{msg.message}</span>
@@ -444,5 +458,13 @@ export default function GamePage() {
         }
       `}</style>
     </div>
+  )
+}
+
+export default function GamePage() {
+  return (
+    <ErrorBoundary>
+      <GamePageContent />
+    </ErrorBoundary>
   )
 }
