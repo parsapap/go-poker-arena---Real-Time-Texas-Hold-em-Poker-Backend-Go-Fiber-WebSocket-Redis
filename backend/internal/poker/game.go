@@ -231,31 +231,80 @@ func (g *Game) collectBets() {
 }
 
 func (g *Game) createSidePots() {
-	// Sort players by total bet for side pot calculation
-	allInPlayers := make([]*Player, 0)
+	// Collect all unique bet amounts from all-in players
+	type betLevel struct {
+		amount  int64
+		players []uint
+	}
+	
+	betLevels := make(map[int64][]uint)
+	
+	// Group players by their total bet amounts
 	for _, player := range g.Players {
-		if player.AllIn && player.TotalBet > 0 {
-			allInPlayers = append(allInPlayers, player)
+		if !player.Folded && player.TotalBet > 0 {
+			betLevels[player.TotalBet] = append(betLevels[player.TotalBet], player.ID)
 		}
 	}
-
-	if len(allInPlayers) == 0 {
-		return
+	
+	// Sort bet levels
+	levels := make([]int64, 0, len(betLevels))
+	for level := range betLevels {
+		levels = append(levels, level)
 	}
-
-	// Create side pots for all-in players
-	for _, allInPlayer := range allInPlayers {
-		sidePot := Pot{Amount: 0, Players: make([]uint, 0)}
-		for _, player := range g.Players {
-			if !player.Folded && player.TotalBet >= allInPlayer.TotalBet {
-				contribution := min(player.TotalBet, allInPlayer.TotalBet)
-				sidePot.Amount += contribution
-				sidePot.Players = append(sidePot.Players, player.ID)
+	
+	// Simple bubble sort for small arrays
+	for i := 0; i < len(levels); i++ {
+		for j := i + 1; j < len(levels); j++ {
+			if levels[i] > levels[j] {
+				levels[i], levels[j] = levels[j], levels[i]
 			}
 		}
-		if sidePot.Amount > 0 {
-			g.Pots = append(g.Pots, sidePot)
+	}
+	
+	// Create side pots based on bet levels
+	previousLevel := int64(0)
+	remainingPlayers := make([]uint, 0)
+	
+	for _, player := range g.Players {
+		if !player.Folded {
+			remainingPlayers = append(remainingPlayers, player.ID)
 		}
+	}
+	
+	for _, level := range levels {
+		if len(remainingPlayers) == 0 {
+			break
+		}
+		
+		potAmount := int64(0)
+		eligiblePlayers := make([]uint, 0)
+		
+		for _, playerID := range remainingPlayers {
+			player := g.getPlayer(playerID)
+			if player != nil && player.TotalBet >= level {
+				contribution := level - previousLevel
+				potAmount += contribution
+				eligiblePlayers = append(eligiblePlayers, playerID)
+			}
+		}
+		
+		if potAmount > 0 && len(eligiblePlayers) > 0 {
+			g.Pots = append(g.Pots, Pot{
+				Amount:  potAmount,
+				Players: eligiblePlayers,
+			})
+		}
+		
+		// Remove players who are all-in at this level
+		newRemaining := make([]uint, 0)
+		for _, playerID := range remainingPlayers {
+			player := g.getPlayer(playerID)
+			if player != nil && player.TotalBet > level {
+				newRemaining = append(newRemaining, playerID)
+			}
+		}
+		remainingPlayers = newRemaining
+		previousLevel = level
 	}
 }
 
