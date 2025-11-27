@@ -133,7 +133,8 @@ export default function LobbyPage() {
   const fetchRooms = async () => {
     try {
       const token = localStorage.getItem('token')
-      const response = await fetch('/api/rooms', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+      const response = await fetch(`${apiUrl}/api/rooms`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -161,7 +162,8 @@ export default function LobbyPage() {
   }) => {
     try {
       const token = localStorage.getItem('token')
-      const response = await fetch('/api/rooms', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+      const response = await fetch(`${apiUrl}/api/rooms`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -184,6 +186,7 @@ export default function LobbyPage() {
   const handleJoinRoom = async (roomId: number) => {
     try {
       const token = localStorage.getItem('token')
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
       
       // Check if room is full before joining
       const room = rooms.find(r => r.id === roomId)
@@ -193,7 +196,7 @@ export default function LobbyPage() {
       }
       
       // Attempt to join the room
-      const response = await fetch(`/api/rooms/${roomId}/join`, {
+      const response = await fetch(`${apiUrl}/api/rooms/${roomId}/join`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -217,7 +220,8 @@ export default function LobbyPage() {
   const handleQuickPlay = async () => {
     try {
       const token = localStorage.getItem('token')
-      const response = await fetch('/api/matchmaking/join', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+      const response = await fetch(`${apiUrl}/api/matchmaking/join`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
