@@ -181,8 +181,37 @@ export default function LobbyPage() {
     }
   }
 
-  const handleJoinRoom = (roomId: number) => {
-    router.push(`/game/${roomId}`)
+  const handleJoinRoom = async (roomId: number) => {
+    try {
+      const token = localStorage.getItem('token')
+      
+      // Check if room is full before joining
+      const room = rooms.find(r => r.id === roomId)
+      if (room && room.player_count && room.player_count >= room.max_players) {
+        alert('This room is full. Please choose another room.')
+        return
+      }
+      
+      // Attempt to join the room
+      const response = await fetch(`/api/rooms/${roomId}/join`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!response.ok) {
+        const error = await response.json()
+        alert(error.error || 'Failed to join room')
+        return
+      }
+      
+      router.push(`/game/${roomId}`)
+    } catch (error) {
+      console.error('Failed to join room:', error)
+      alert('Failed to join room. Please try again.')
+    }
   }
 
   const handleQuickPlay = async () => {
