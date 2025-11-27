@@ -22,17 +22,26 @@ export default function LoginPage() {
     setError('')
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+      const response = await fetch(`${apiUrl}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       })
 
-      const data = await response.json()
-
       if (!response.ok) {
-        throw new Error(data.error || 'Login failed')
+        const text = await response.text()
+        let errorMessage = 'Login failed'
+        try {
+          const data = JSON.parse(text)
+          errorMessage = data.error || errorMessage
+        } catch {
+          errorMessage = text || errorMessage
+        }
+        throw new Error(errorMessage)
       }
+
+      const data = await response.json()
 
       localStorage.setItem('token', data.token)
       localStorage.setItem('user', JSON.stringify(data.user))

@@ -23,17 +23,26 @@ export default function RegisterPage() {
     setError('')
 
     try {
-      const response = await fetch('/api/auth/signup', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+      const response = await fetch(`${apiUrl}/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       })
 
-      const data = await response.json()
-
       if (!response.ok) {
-        throw new Error(data.error || 'Registration failed')
+        const text = await response.text()
+        let errorMessage = 'Registration failed'
+        try {
+          const data = JSON.parse(text)
+          errorMessage = data.error || errorMessage
+        } catch {
+          errorMessage = text || errorMessage
+        }
+        throw new Error(errorMessage)
       }
+
+      const data = await response.json()
 
       localStorage.setItem('token', data.token)
       localStorage.setItem('user', JSON.stringify(data.user))
