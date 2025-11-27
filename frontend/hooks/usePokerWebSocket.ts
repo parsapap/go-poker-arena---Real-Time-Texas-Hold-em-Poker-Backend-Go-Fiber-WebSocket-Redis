@@ -9,6 +9,7 @@ interface UsePokerWebSocketProps {
   roomId: string
   userId: number
   username: string
+  enabled?: boolean
   onConnect?: () => void
   onDisconnect?: () => void
   onError?: (error: Event) => void
@@ -18,6 +19,7 @@ export function usePokerWebSocket({
   roomId,
   userId,
   username,
+  enabled = true,
   onConnect,
   onDisconnect,
   onError
@@ -46,12 +48,23 @@ export function usePokerWebSocket({
 
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) return
+    
+    // Don't connect if disabled or user data is not loaded yet
+    if (!enabled || !userId || !username) {
+      if (!enabled) {
+        logger.debug('WebSocket connection disabled')
+      } else {
+        logger.warn('Cannot connect: user data not loaded')
+      }
+      return
+    }
 
     try {
       // Connect to WebSocket with auto-detected URL
       const wsUrl = getWebSocketUrl()
       const url = `${wsUrl}/ws?user_id=${userId}&username=${encodeURIComponent(username)}&room_id=${roomId}`
       
+      logger.info(`Connecting to WebSocket: ${url}`)
       ws.current = new WebSocket(url)
 
       ws.current.onopen = () => {
@@ -64,24 +77,42 @@ export function usePokerWebSocket({
         // Start heartbeat
         heartbeatInterval.current = setInterval(() => {
           if (ws.current?.readyState === WebSocket.OPEN) {
-            ws.current.send(JSON.stringify({ type: 'ping' }))
+            try {
+              ws.current.send(JSON.stringify({ type: 'ping' }))
+            } catch (error) {
+              logger.error('Failed to send ping', error)
+            }
           }
         }, 30000) // Every 30 seconds
 
-        // Send join message
-        sendMessage({
-          type: 'join',
-          room_id: roomId,
-          user_id: userId,
-          username
-        })
+        // Send join message directly (don't use sendMessage to avoid circular dependency)
+        try {
+          if (ws.current?.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+              type: 'join',
+              room_id: roomId,
+              user_id: userId,
+              username
+            }))
+            logger.debug('Join message sent')
+          }
+        } catch (error) {
+          logger.error('Failed to send join message', error)
+        }
       }
 
-      ws.current.onclose = () => {
+      ws.current.onclose = (event) => {
         logger.ws.disconnected()
+        logger.info(`WebSocket closed: code=${event.code}, reason=${event.reason}`)
         setIsConnected(false)
         clearInterval(heartbeatInterval.current)
         onDisconnect?.()
+
+        // Don't reconnect if it was a clean close or if disabled
+        if (!enabled || event.code === 1000) {
+          logger.info('Clean disconnect, not reconnecting')
+          return
+        }
 
         // Attempt reconnection
         if (reconnectAttempts.current < maxReconnectAttempts) {
@@ -93,6 +124,13 @@ export function usePokerWebSocket({
           reconnectTimeout.current = setTimeout(() => {
             connect()
           }, delay)
+        } else {
+          logger.error('Max reconnection attempts reached')
+          addChatMessage({
+            user: 'System',
+            message: 'Connection lost. Please refresh the page.',
+            timestamp: Date.now()
+          })
         }
       }
 
@@ -120,7 +158,7 @@ export function usePokerWebSocket({
     } catch (error) {
       logger.error('Error connecting to WebSocket', error)
     }
-  }, [roomId, userId, username, onConnect, onDisconnect, onError])
+  }, [roomId, userId, username, enabled, onConnect, onDisconnect, onError])
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
     logger.ws.message(message.type, message.payload)
@@ -343,13 +381,18 @@ export function usePokerWebSocket({
     clearTimeout(reconnectTimeout.current)
     clearInterval(heartbeatInterval.current)
     
-    if (ws.current) {
-      // Send leave message
-      sendMessage({
-        type: 'leave',
-        room_id: roomId,
-        user_id: userId
-      })
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      try {
+        // Send leave message directly
+        ws.current.send(JSON.stringify({
+          type: 'leave',
+          room_id: roomId,
+          user_id: userId
+        }))
+        logger.debug('Leave message sent')
+      } catch (error) {
+        logger.error('Failed to send leave message', error)
+      }
       
       ws.current.close()
       ws.current = null
@@ -357,15 +400,18 @@ export function usePokerWebSocket({
     
     setIsConnected(false)
     setIsReconnecting(false)
-  }, [roomId, userId, sendMessage])
+  }, [roomId, userId])
 
   useEffect(() => {
-    connect()
+    // Only connect if enabled and user data is available
+    if (enabled && userId && username) {
+      connect()
+    }
 
     return () => {
       disconnect()
     }
-  }, [connect, disconnect])
+  }, [enabled, userId, username, connect, disconnect])
 
   return {
     isConnected,
