@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go Poker Arena - Test Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        .subtitle {
+            text-align: center;
+            opacity: 0.9;
+            margin-bottom: 30px;
+        }
+        .status {
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            backdrop-filter: blur(10px);
+        }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .status-item {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .status-item.pass {
+            border: 2px solid #10b981;
+        }
+        .status-item.fail {
+            border: 2px solid #ef4444;
+        }
+        .pages-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .page-card {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 25px;
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .page-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        .page-icon {
+            font-size: 3em;
+            margin-bottom: 10px;
+        }
+        .page-title {
+            font-size: 1.5em;
+            margin-bottom: 10px;
+        }
+        .page-desc {
+            opacity: 0.8;
+            margin-bottom: 15px;
+            font-size: 0.9em;
+        }
+        .page-link {
+            display: inline-block;
+            background: white;
+            color: #667eea;
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        .page-link:hover {
+            background: #f0f0f0;
+        }
+        .api-section {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 25px;
+            backdrop-filter: blur(10px);
+            margin-bottom: 30px;
+        }
+        .api-endpoint {
+            background: rgba(0,0,0,0.2);
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .test-button {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            margin: 5px;
+            transition: background 0.3s;
+        }
+        .test-button:hover {
+            background: #059669;
+        }
+        .test-results {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .success { color: #10b981; }
+        .error { color: #ef4444; }
+        .warning { color: #f59e0b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎰 Go Poker Arena</h1>
+        <p class="subtitle">Test Dashboard - All Pages & Features</p>
+
+        <!-- Status Section -->
+        <div class="status">
+            <h2>🔍 System Status</h2>
+            <div class="status-grid">
+                <div class="status-item pass" id="backend-status">
+                    <div>🖥️ Backend</div>
+                    <div id="backend-text">Checking...</div>
+                </div>
+                <div class="status-item pass" id="frontend-status">
+                    <div>🌐 Frontend</div>
+                    <div id="frontend-text">Checking...</div>
+                </div>
+                <div class="status-item pass" id="db-status">
+                    <div>🗄️ Database</div>
+                    <div id="db-text">Checking...</div>
+                </div>
+                <div class="status-item pass" id="ws-status">
+                    <div>🔌 WebSocket</div>
+                    <div id="ws-text">Checking...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pages Section -->
+        <h2 style="margin-bottom: 20px;">📄 Available Pages</h2>
+        <div class="pages-grid">
+            <div class="page-card">
+                <div class="page-icon">🏠</div>
+                <div class="page-title">Lobby / Home</div>
+                <div class="page-desc">Main page with room list, create room, and quick play</div>
+                <a href="http://localhost:3001/" target="_blank" class="page-link">Open Lobby →</a>
+            </div>
+
+            <div class="page-card">
+                <div class="page-icon">🔐</div>
+                <div class="page-title">Login</div>
+                <div class="page-desc">Login with existing account (parsa / parsa10)</div>
+                <a href="http://localhost:3001/login" target="_blank" class="page-link">Open Login →</a>
+            </div>
+
+            <div class="page-card">
+                <div class="page-icon">📝</div>
+                <div class="page-title">Register</div>
+                <div class="page-desc">Create new account and get 1000 starting chips</div>
+                <a href="http://localhost:3001/register" target="_blank" class="page-link">Open Register →</a>
+            </div>
+
+            <div class="page-card">
+                <div class="page-icon">🎮</div>
+                <div class="page-title">Game Room</div>
+                <div class="page-desc">Play Texas Hold'em poker with real-time updates</div>
+                <a href="http://localhost:3001/game/1" target="_blank" class="page-link">Open Game →</a>
+            </div>
+        </div>
+
+        <!-- API Testing Section -->
+        <div class="api-section">
+            <h2>🧪 API Testing</h2>
+            <p style="margin-bottom: 15px;">Test backend endpoints directly</p>
+            
+            <button class="test-button" onclick="testHealth()">Test Health</button>
+            <button class="test-button" onclick="testRegister()">Test Register</button>
+            <button class="test-button" onclick="testLogin()">Test Login</button>
+            <button class="test-button" onclick="testRooms()">Test Rooms</button>
+            <button class="test-button" onclick="testAll()">Run All Tests</button>
+
+            <div class="test-results" id="test-results">
+                <div class="success">Ready to test! Click a button above.</div>
+            </div>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="api-section">
+            <h2>🔗 Quick Links</h2>
+            <div class="api-endpoint">Backend API: <a href="http://localhost:8080/healthz" target="_blank" style="color: #60a5fa;">http://localhost:8080/healthz</a></div>
+            <div class="api-endpoint">Frontend: <a href="http://localhost:3001" target="_blank" style="color: #60a5fa;">http://localhost:3001</a></div>
+            <div class="api-endpoint">Metrics: <a href="http://localhost:8080/metrics" target="_blank" style="color: #60a5fa;">http://localhost:8080/metrics</a></div>
+        </div>
+    </div>
+
+    <script>
+        let token = '';
+
+        // Check system status on load
+        window.onload = async () => {
+            await checkBackend();
+            await checkFrontend();
+            await checkWebSocket();
+        };
+
+        async function checkBackend() {
+            try {
+                const response = await fetch('http://localhost:8080/healthz');
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    document.getElementById('backend-text').innerHTML = '✅ Online';
+                    document.getElementById('backend-status').classList.add('pass');
+                } else {
+                    throw new Error('Not healthy');
+                }
+            } catch (error) {
+                document.getElementById('backend-text').innerHTML = '❌ Offline';
+                document.getElementById('backend-status').classList.add('fail');
+            }
+        }
+
+        async function checkFrontend() {
+            try {
+                const response = await fetch('http://localhost:3001');
+                if (response.ok) {
+                    document.getElementById('frontend-text').innerHTML = '✅ Online';
+                    document.getElementById('frontend-status').classList.add('pass');
+                } else {
+                    throw new Error('Not responding');
+                }
+            } catch (error) {
+                document.getElementById('frontend-text').innerHTML = '❌ Offline';
+                document.getElementById('frontend-status').classList.add('fail');
+            }
+        }
+
+        async function checkWebSocket() {
+            try {
+                const response = await fetch('http://localhost:8080/ws?user_id=1&username=test&room_id=1', {
+                    headers: {
+                        'Connection': 'Upgrade',
+                        'Upgrade': 'websocket'
+                    }
+                });
+                document.getElementById('ws-text').innerHTML = '✅ Ready';
+                document.getElementById('ws-status').classList.add('pass');
+            } catch (error) {
+                document.getElementById('ws-text').innerHTML = '⚠️ Check';
+                document.getElementById('ws-status').classList.add('pass');
+            }
+        }
+
+        function log(message, type = 'success') {
+            const results = document.getElementById('test-results');
+            const className = type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'success';
+            results.innerHTML += `<div class="${className}">${message}</div>`;
+            results.scrollTop = results.scrollHeight;
+        }
+
+        async function testHealth() {
+            document.getElementById('test-results').innerHTML = '';
+            log('Testing backend health...');
+            try {
+                const response = await fetch('http://localhost:8080/healthz');
+                const data = await response.json();
+                log(`✅ Backend is healthy: ${JSON.stringify(data)}`);
+            } catch (error) {
+                log(`❌ Backend health check failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testRegister() {
+            document.getElementById('test-results').innerHTML = '';
+            log('Testing registration...');
+            const username = 'test' + Date.now();
+            try {
+                const response = await fetch('http://localhost:8080/auth/signup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: username,
+                        email: username + '@test.com',
+                        password: 'test123'
+                    })
+                });
+                const data = await response.json();
+                if (data.token) {
+                    token = data.token;
+                    log(`✅ Registration successful! User: ${data.user.username}`);
+                    log(`Token: ${token.substring(0, 30)}...`);
+                } else {
+                    log(`❌ Registration failed: ${JSON.stringify(data)}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Registration error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testLogin() {
+            document.getElementById('test-results').innerHTML = '';
+            log('Testing login...');
+            try {
+                const response = await fetch('http://localhost:8080/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: 'parsa',
+                        password: 'parsa10'
+                    })
+                });
+                const data = await response.json();
+                if (data.token) {
+                    token = data.token;
+                    log(`✅ Login successful! User: ${data.user.username}`);
+                    log(`Chips: ${data.user.chips}`);
+                    log(`Token: ${token.substring(0, 30)}...`);
+                } else {
+                    log(`❌ Login failed: ${JSON.stringify(data)}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Login error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testRooms() {
+            document.getElementById('test-results').innerHTML = '';
+            if (!token) {
+                log('⚠️ No token found. Running login first...', 'warning');
+                await testLogin();
+            }
+            log('Testing rooms endpoint...');
+            try {
+                const response = await fetch('http://localhost:8080/api/rooms', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await response.json();
+                log(`✅ Rooms endpoint works! Found ${data.length} rooms`);
+                if (data.length > 0) {
+                    log(`First room: ${JSON.stringify(data[0])}`);
+                } else {
+                    log('No rooms available. Create one in the lobby!', 'warning');
+                }
+            } catch (error) {
+                log(`❌ Rooms error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testAll() {
+            document.getElementById('test-results').innerHTML = '';
+            log('🧪 Running all tests...\n');
+            await testHealth();
+            log('');
+            await testRegister();
+            log('');
+            await testLogin();
+            log('');
+            await testRooms();
+            log('\n✅ All tests completed!');
+        }
+    </script>
+</body>
+</html>
