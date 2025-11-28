@@ -251,6 +251,20 @@ func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService
 		return c.JSON(rooms)
 	})
 
+	api.Get("/rooms/:id", func(c *fiber.Ctx) error {
+		roomID, err := c.ParamsInt("id")
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid room ID"})
+		}
+
+		room, err := roomManager.GetRoom(uint(roomID))
+		if err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "Room not found"})
+		}
+
+		return c.JSON(room)
+	})
+
 	api.Post("/rooms", func(c *fiber.Ctx) error {
 		var req struct {
 			Name       string `json:"name"`

@@ -108,8 +108,8 @@ func (m *Manager) JoinRoom(roomID, userID uint) error {
 		isStarting, _ := m.Redis.Exists(ctx, startingKey).Result()
 		
 		if isStarting == 0 {
-			// Mark as starting to prevent duplicate starts
-			m.Redis.SetEx(ctx, startingKey, "1", 5)
+			// Mark as starting to prevent duplicate starts (5 seconds)
+			m.Redis.SetEx(ctx, startingKey, "1", 5*time.Second)
 			
 			fmt.Printf("[ROOM %d] %d players → starting game in 3s\n", roomID, newCount)
 			
