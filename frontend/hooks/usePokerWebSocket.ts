@@ -31,6 +31,7 @@ export function usePokerWebSocket({
   const [isReconnecting, setIsReconnecting] = useState(false)
   const reconnectAttempts = useRef(0)
   const maxReconnectAttempts = 5
+  const isConnecting = useRef(false) // Prevent duplicate connections
 
   const {
     setPlayers,
@@ -47,43 +48,71 @@ export function usePokerWebSocket({
   } = useGameStore()
 
   const connect = useCallback(() => {
-    if (ws.current?.readyState === WebSocket.OPEN) return
+    // Prevent duplicate connections
+    if (isConnecting.current) {
+      if (process.env.NODE_ENV === 'development') {
+        logger.debug('Connection already in progress, skipping')
+      }
+      return
+    }
+    
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      if (process.env.NODE_ENV === 'development') {
+        logger.debug('WebSocket already connected')
+      }
+      return
+    }
     
     // Don't connect if disabled or user data is not loaded yet
     if (!enabled || !userId || !username) {
-      if (!enabled) {
-        logger.debug('WebSocket connection disabled')
-      } else {
-        logger.warn('Cannot connect: user data not loaded')
+      if (process.env.NODE_ENV === 'development') {
+        if (!enabled) {
+          logger.debug('WebSocket connection disabled')
+        } else {
+          logger.warn('Cannot connect: user data not loaded')
+        }
       }
       return
     }
 
     try {
+      isConnecting.current = true
+      setIsReconnecting(reconnectAttempts.current > 0)
+      
       // Connect to WebSocket with auto-detected URL
       const wsUrl = getWebSocketUrl()
       const url = `${wsUrl}/ws?user_id=${userId}&username=${encodeURIComponent(username)}&room_id=${roomId}`
       
-      logger.info(`Connecting to WebSocket: ${url}`)
+      if (process.env.NODE_ENV === 'development') {
+        logger.info(`Connecting to WebSocket: ${url}`)
+      }
+      
       ws.current = new WebSocket(url)
 
       ws.current.onopen = () => {
-        logger.ws.connected()
+        isConnecting.current = false
         setIsConnected(true)
         setIsReconnecting(false)
         reconnectAttempts.current = 0
+        
+        if (process.env.NODE_ENV === 'development') {
+          logger.ws.connected()
+        }
+        
         onConnect?.()
 
-        // Start heartbeat
+        // Start heartbeat - ping every 20 seconds
         heartbeatInterval.current = setInterval(() => {
           if (ws.current?.readyState === WebSocket.OPEN) {
             try {
               ws.current.send(JSON.stringify({ type: 'ping' }))
             } catch (error) {
-              logger.error('Failed to send ping', error)
+              if (process.env.NODE_ENV === 'development') {
+                logger.error('Failed to send ping', error)
+              }
             }
           }
-        }, 30000) // Every 30 seconds
+        }, 20000) // Every 20 seconds
 
         // Send join message directly (don't use sendMessage to avoid circular dependency)
         try {
@@ -94,38 +123,57 @@ export function usePokerWebSocket({
               user_id: userId,
               username
             }))
-            logger.debug('Join message sent')
+            if (process.env.NODE_ENV === 'development') {
+              logger.debug('Join message sent')
+            }
           }
         } catch (error) {
-          logger.error('Failed to send join message', error)
+          if (process.env.NODE_ENV === 'development') {
+            logger.error('Failed to send join message', error)
+          }
         }
       }
 
       ws.current.onclose = (event) => {
-        logger.ws.disconnected()
-        logger.info(`WebSocket closed: code=${event.code}, reason=${event.reason}`)
+        isConnecting.current = false
         setIsConnected(false)
         clearInterval(heartbeatInterval.current)
+        
+        if (process.env.NODE_ENV === 'development') {
+          logger.ws.disconnected()
+          logger.info(`WebSocket closed: code=${event.code}, reason=${event.reason}`)
+        }
+        
         onDisconnect?.()
 
         // Don't reconnect if it was a clean close or if disabled
         if (!enabled || event.code === 1000) {
-          logger.info('Clean disconnect, not reconnecting')
+          if (process.env.NODE_ENV === 'development') {
+            logger.info('Clean disconnect, not reconnecting')
+          }
           return
         }
 
-        // Attempt reconnection
+        // Attempt reconnection with exponential backoff
         if (reconnectAttempts.current < maxReconnectAttempts) {
           setIsReconnecting(true)
           reconnectAttempts.current++
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 10000)
-          logger.ws.reconnecting(reconnectAttempts.current)
+          
+          // Exponential backoff: 1s → 2s → 4s → 8s → 10s (max)
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current - 1), 10000)
+          
+          if (process.env.NODE_ENV === 'development') {
+            logger.ws.reconnecting(reconnectAttempts.current)
+            logger.info(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})`)
+          }
           
           reconnectTimeout.current = setTimeout(() => {
             connect()
           }, delay)
         } else {
-          logger.error('Max reconnection attempts reached')
+          if (process.env.NODE_ENV === 'development') {
+            logger.error('Max reconnection attempts reached')
+          }
           addChatMessage({
             user: 'System',
             message: 'Connection lost. Please refresh the page.',
@@ -135,16 +183,23 @@ export function usePokerWebSocket({
       }
 
       ws.current.onerror = (error) => {
-        logger.ws.error(error)
+        isConnecting.current = false
         setIsConnected(false)
+        
+        if (process.env.NODE_ENV === 'development') {
+          logger.ws.error(error)
+        }
+        
         onError?.(error)
         
-        // Show user-friendly error
-        addChatMessage({
-          user: 'System',
-          message: 'Connection error. Attempting to reconnect...',
-          timestamp: Date.now()
-        })
+        // Show user-friendly error only once
+        if (reconnectAttempts.current === 0) {
+          addChatMessage({
+            user: 'System',
+            message: 'Connection error. Attempting to reconnect...',
+            timestamp: Date.now()
+          })
+        }
       }
 
       ws.current.onmessage = (event) => {
@@ -152,11 +207,16 @@ export function usePokerWebSocket({
           const message: WebSocketMessage = JSON.parse(event.data)
           handleMessage(message)
         } catch (error) {
-          logger.error('Error parsing WebSocket message', error)
+          if (process.env.NODE_ENV === 'development') {
+            logger.error('Error parsing WebSocket message', error)
+          }
         }
       }
     } catch (error) {
-      logger.error('Error connecting to WebSocket', error)
+      isConnecting.current = false
+      if (process.env.NODE_ENV === 'development') {
+        logger.error('Error connecting to WebSocket', error)
+      }
     }
   }, [roomId, userId, username, enabled, onConnect, onDisconnect, onError])
 
@@ -380,6 +440,7 @@ export function usePokerWebSocket({
   const disconnect = useCallback(() => {
     clearTimeout(reconnectTimeout.current)
     clearInterval(heartbeatInterval.current)
+    isConnecting.current = false
     
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       try {
@@ -389,17 +450,22 @@ export function usePokerWebSocket({
           room_id: roomId,
           user_id: userId
         }))
-        logger.debug('Leave message sent')
+        if (process.env.NODE_ENV === 'development') {
+          logger.debug('Leave message sent')
+        }
       } catch (error) {
-        logger.error('Failed to send leave message', error)
+        if (process.env.NODE_ENV === 'development') {
+          logger.error('Failed to send leave message', error)
+        }
       }
       
-      ws.current.close()
+      ws.current.close(1000, 'User disconnected') // Clean close
       ws.current = null
     }
     
     setIsConnected(false)
     setIsReconnecting(false)
+    reconnectAttempts.current = 0
   }, [roomId, userId])
 
   useEffect(() => {
