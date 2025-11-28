@@ -23,6 +23,7 @@ type Client struct {
 	Username    string
 	RoomID      string
 	RoomManager interface {
+		JoinRoom(roomID, userID uint) error
 		ProcessAction(roomID, playerID uint, action string, amount int64) error
 	}
 }
@@ -76,8 +77,33 @@ func (c *Client) ReadPump() {
 		if msg.Type == "join" {
 			log.Printf("[DEBUG] Attempting to add client to room user_id=%d room_id=%s username=%s", c.UserID, c.RoomID, c.Username)
 			
-			// For now, just acknowledge the join without calling RoomManager
-			// The room management will be handled separately
+			// Add player to room via RoomManager
+			if c.RoomManager != nil {
+				var roomID uint
+				fmt.Sscanf(c.RoomID, "%d", &roomID)
+				
+				if err := c.RoomManager.JoinRoom(roomID, c.UserID); err != nil {
+					log.Printf("[ERROR] Failed to join room: %v", err)
+					
+					// Send error to client
+					errorMsg := Message{
+						Type: "error",
+						Data: map[string]interface{}{
+							"message": fmt.Sprintf("Failed to join room: %v", err),
+						},
+					}
+					if data, err := json.Marshal(errorMsg); err == nil {
+						select {
+						case c.Send <- data:
+						default:
+							close(c.Send)
+							return
+						}
+					}
+					continue
+				}
+			}
+			
 			log.Printf("[INFO] Client joined room user_id=%d room_id=%s", c.UserID, c.RoomID)
 			
 			// Send join confirmation to client
@@ -98,6 +124,15 @@ func (c *Client) ReadPump() {
 					return
 				}
 			}
+			
+			// Broadcast playerJoined to all clients in room
+			joinedMsg := Message{
+				Type:     "playerJoined",
+				RoomID:   c.RoomID,
+				UserID:   c.UserID,
+				Username: c.Username,
+			}
+			c.Hub.Broadcast <- &joinedMsg
 		}
 
 		// Handle game actions

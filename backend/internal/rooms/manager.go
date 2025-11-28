@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 	"go-poker-arena/internal/models"
 	"go-poker-arena/internal/poker"
 	"github.com/redis/go-redis/v9"
@@ -93,7 +94,31 @@ func (m *Manager) JoinRoom(roomID, userID uint) error {
 		return fmt.Errorf("room is full")
 	}
 
-	return m.Redis.SAdd(ctx, key, userID).Err()
+	if err := m.Redis.SAdd(ctx, key, userID).Err(); err != nil {
+		return err
+	}
+
+	// Check if we have enough players to start the game
+	newCount := count + 1
+	fmt.Printf("[ROOM %d] Player %d joined → %d players total\n", roomID, userID, newCount)
+	
+	if newCount >= 2 && room.Status == "waiting" {
+		// Check if game is not already starting
+		startingKey := fmt.Sprintf("room:%d:starting", roomID)
+		isStarting, _ := m.Redis.Exists(ctx, startingKey).Result()
+		
+		if isStarting == 0 {
+			// Mark as starting to prevent duplicate starts
+			m.Redis.SetEx(ctx, startingKey, "1", 5)
+			
+			fmt.Printf("[ROOM %d] %d players → starting game in 3s\n", roomID, newCount)
+			
+			// Start countdown in goroutine
+			go m.StartGameCountdown(roomID)
+		}
+	}
+
+	return nil
 }
 
 func (m *Manager) LeaveRoom(roomID, userID uint) error {
@@ -119,6 +144,40 @@ func (m *Manager) GetRoomPlayers(roomID uint) ([]uint, error) {
 	}
 
 	return playerIDs, nil
+}
+
+func (m *Manager) StartGameCountdown(roomID uint) {
+	ctx := context.Background()
+	
+	// Countdown: 3, 2, 1
+	for i := 3; i > 0; i-- {
+		countdownData, _ := json.Marshal(map[string]interface{}{
+			"type":      "gameStarting",
+			"room_id":   roomID,
+			"countdown": i,
+			"message":   fmt.Sprintf("Game starting in %d...", i),
+		})
+		m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), countdownData)
+		fmt.Printf("[ROOM %d] Countdown: %d\n", roomID, i)
+		
+		time.Sleep(1 * time.Second)
+	}
+	
+	// Start the game
+	fmt.Printf("[ROOM %d] Starting game NOW!\n", roomID)
+	room, err := m.StartGame(roomID)
+	if err != nil {
+		fmt.Printf("[ROOM %d] Failed to start game: %v\n", roomID, err)
+		// Broadcast error
+		errorData, _ := json.Marshal(map[string]interface{}{
+			"type":    "error",
+			"room_id": roomID,
+			"message": fmt.Sprintf("Failed to start game: %v", err),
+		})
+		m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), errorData)
+	} else {
+		fmt.Printf("[ROOM %d] Game started successfully! Status: %s\n", roomID, room.Status)
+	}
 }
 
 func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
@@ -161,11 +220,15 @@ func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
 
 	m.Games[roomID] = game
 
+	// Update room status
+	room.Status = "playing"
+	m.DB.Model(room).Update("status", "playing")
+
 	// Save game to database
 	dbGame := &models.Game{
 		RoomID: roomID,
 		Status: "active",
-		Pot:    0,
+		Pot:    game.Pots[0].Amount,
 		Stage:  string(game.Phase),
 	}
 	if err := m.DB.Create(dbGame).Error; err != nil {
@@ -173,14 +236,57 @@ func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
 	}
 	game.ID = dbGame.ID
 
-	// Publish game start event
 	ctx := context.Background()
-	gameData, _ := json.Marshal(map[string]interface{}{
-		"type":    "game_start",
-		"room_id": roomID,
-		"game":    game,
+	
+	// 1. Broadcast deal (hole cards sent privately in hub)
+	dealData, _ := json.Marshal(map[string]interface{}{
+		"type":            "deal",
+		"room_id":         roomID,
+		"phase":           game.Phase,
+		"community_cards": game.CommunityCards,
 	})
-	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), gameData)
+	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), dealData)
+	fmt.Printf("[ROOM %d] Broadcast: deal (phase=%s)\n", roomID, game.Phase)
+
+	// 2. Broadcast phase change
+	phaseData, _ := json.Marshal(map[string]interface{}{
+		"type":    "phaseChange",
+		"room_id": roomID,
+		"phase":   game.Phase,
+	})
+	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), phaseData)
+	fmt.Printf("[ROOM %d] Broadcast: phaseChange (phase=%s)\n", roomID, game.Phase)
+
+	// 3. Broadcast pot update
+	potData, _ := json.Marshal(map[string]interface{}{
+		"type":        "potUpdate",
+		"room_id":     roomID,
+		"pot":         game.Pots[0].Amount,
+		"current_bet": game.CurrentBet,
+	})
+	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), potData)
+	fmt.Printf("[ROOM %d] Broadcast: potUpdate (pot=%d, current_bet=%d)\n", roomID, game.Pots[0].Amount, game.CurrentBet)
+
+	// 4. Broadcast player turn
+	currentPlayer := game.Players[game.CurrentPosition]
+	turnData, _ := json.Marshal(map[string]interface{}{
+		"type":      "playerTurn",
+		"room_id":   roomID,
+		"player_id": currentPlayer.ID,
+		"username":  currentPlayer.Username,
+		"position":  game.CurrentPosition,
+	})
+	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), turnData)
+	fmt.Printf("[ROOM %d] Broadcast: playerTurn (player=%s, position=%d)\n", roomID, currentPlayer.Username, game.CurrentPosition)
+
+	// 5. Broadcast full game state
+	gameStateData, _ := json.Marshal(map[string]interface{}{
+		"type":    "gameState",
+		"room_id": roomID,
+		"game":    m.serializeGameState(game, 0),
+	})
+	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), gameStateData)
+	fmt.Printf("[ROOM %d] Broadcast: gameState\n", roomID)
 
 	return room, nil
 }
