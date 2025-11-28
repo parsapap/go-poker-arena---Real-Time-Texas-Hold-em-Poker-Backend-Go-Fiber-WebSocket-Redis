@@ -5,20 +5,24 @@
 export function getWebSocketUrl(): string {
   // In browser
   if (typeof window !== 'undefined') {
-    // Use environment variable if set
+    // 1. Use environment variable if explicitly set
     if (process.env.NEXT_PUBLIC_WS_URL) {
       return process.env.NEXT_PUBLIC_WS_URL
     }
 
-    // Auto-detect based on current location
+    // 2. Auto-detect based on current location (production)
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.hostname
     
-    // In Docker, backend is on port 8080
-    // In development, backend is on port 8080
-    const port = process.env.NODE_ENV === 'production' ? window.location.port : '8080'
-    
-    return `${protocol}//${host}:${port}`
+    // In production, use same host as frontend (no port, goes through proxy)
+    // In development, connect directly to backend on port 8080
+    if (process.env.NODE_ENV === 'production') {
+      // Production: use wss://current-domain/ws (no port)
+      return `${protocol}//${host}`
+    } else {
+      // Development: connect directly to backend
+      return `${protocol}//${host}:8080`
+    }
   }
 
   // Fallback for SSR
