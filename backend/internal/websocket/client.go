@@ -39,9 +39,15 @@ type Message struct {
 
 func (c *Client) ReadPump() {
 	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[PANIC] ReadPump panic for user %d: %v", c.UserID, r)
+		}
+		log.Printf("[DEBUG] ReadPump exiting for user %d, closing connection", c.UserID)
 		c.Hub.Unregister <- c
 		c.Conn.Close()
 	}()
+
+	log.Printf("[DEBUG] ReadPump started for user %d in room %s", c.UserID, c.RoomID)
 
 	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.Conn.SetPongHandler(func(string) error {
@@ -52,8 +58,9 @@ func (c *Client) ReadPump() {
 	for {
 		_, message, err := c.Conn.ReadMessage()
 		if err != nil {
+			log.Printf("[DEBUG] ReadMessage error for user %d: %v", c.UserID, err)
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
+				log.Printf("[ERROR] Unexpected close error: %v", err)
 			}
 			break
 		}
