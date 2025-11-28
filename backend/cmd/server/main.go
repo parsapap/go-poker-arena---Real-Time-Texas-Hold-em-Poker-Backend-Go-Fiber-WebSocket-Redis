@@ -99,12 +99,25 @@ func main() {
 
 	// Middleware
 	app.Use(recover.New())
-	app.Use(cors.New(cors.Config{
-		AllowOrigins:     getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001"),
+	
+	// CORS configuration - allow WebSocket upgrade
+	env := getEnv("ENV", "development")
+	corsConfig := cors.Config{
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
-		AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,Upgrade,Connection,Sec-WebSocket-Key,Sec-WebSocket-Version,Sec-WebSocket-Extensions",
 		AllowCredentials: true,
-	}))
+	}
+	
+	if env == "development" {
+		// Development: allow all origins for WebSocket testing
+		corsConfig.AllowOrigins = "*"
+		corsConfig.AllowCredentials = false // Can't use credentials with wildcard
+	} else {
+		// Production: specific origins only
+		corsConfig.AllowOrigins = getEnv("ALLOWED_ORIGINS", "http://localhost:3000")
+	}
+	
+	app.Use(cors.New(corsConfig))
 	app.Use(metrics.MetricsMiddleware())
 
 	// Health check
@@ -506,13 +519,20 @@ func setupAdminRoutes(api fiber.Router, adminMiddleware *middleware.AdminMiddlew
 func setupWebSocketRoute(app *fiber.App, hub *websocket.Hub, roomManager *rooms.Manager, 
 	rateLimiter *middleware.RateLimiter) {
 	
-	app.Use("/ws", rateLimiter.WebSocketLimit(5))
+	// WebSocket middleware - check upgrade and set headers
 	app.Use("/ws", func(c *fiber.Ctx) error {
+		// Set CORS headers for WebSocket
+		c.Set("Access-Control-Allow-Origin", "*")
+		c.Set("Access-Control-Allow-Credentials", "true")
+		c.Set("Access-Control-Allow-Headers", "*")
+		
 		if ws.IsWebSocketUpgrade(c) {
 			return c.Next()
 		}
 		return fiber.ErrUpgradeRequired
 	})
+	
+	app.Use("/ws", rateLimiter.WebSocketLimit(5))
 
 	app.Get("/ws", ws.New(func(c *ws.Conn) {
 		metrics.WebSocketConnections.Inc()
