@@ -150,8 +150,33 @@ function GamePageContent() {
       
       <Navbar chips={user?.chips || 5000} />
 
-      {/* Connection status */}
-      {!isConnected && <ConnectionStatus isConnected={isConnected} />}
+      {/* Connection Status Badge - Top Right */}
+      <motion.div
+        initial={{ opacity: 0, x: 20 }}
+        animate={{ opacity: 1, x: 0 }}
+        className="fixed top-24 right-4 z-50"
+      >
+        <div className={`
+          px-4 py-2 rounded-full flex items-center gap-2 text-sm font-medium
+          ${isConnected ? 'bg-green-500/20 border-green-500/50 text-green-400' : 
+            isReconnecting ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-400' : 
+            'bg-red-500/20 border-red-500/50 text-red-400'}
+          border-2 backdrop-blur-sm
+        `}>
+          <motion.div
+            animate={isConnected ? { scale: [1, 1.2, 1] } : {}}
+            transition={{ duration: 2, repeat: Infinity }}
+            className={`w-2 h-2 rounded-full ${
+              isConnected ? 'bg-green-400' : 
+              isReconnecting ? 'bg-yellow-400 animate-pulse' : 
+              'bg-red-400'
+            }`}
+          />
+          <span>
+            {isConnected ? 'Connected' : isReconnecting ? 'Connecting...' : 'Disconnected'}
+          </span>
+        </div>
+      </motion.div>
 
       {/* Reconnection overlay */}
       <ReconnectionOverlay isReconnecting={isReconnecting} onRetry={reconnect} />
