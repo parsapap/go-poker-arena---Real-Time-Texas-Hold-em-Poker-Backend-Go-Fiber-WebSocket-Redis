@@ -420,6 +420,32 @@ export function usePokerWebSocket({
         }
         break
 
+      case 'gameStarting':
+        // Game countdown
+        const countdown = message.data?.countdown || message.payload?.countdown
+        const countdownMsg = message.data?.message || message.payload?.message || `Game starting in ${countdown}...`
+        
+        if (process.env.NODE_ENV === 'development') {
+          logger.info('Game starting countdown', { countdown, message: countdownMsg })
+        }
+        
+        addChatMessage({
+          user: 'System',
+          message: `🎮 ${countdownMsg}`,
+          timestamp: Date.now()
+        })
+        break
+
+      case 'playerJoined':
+        // Another player joined
+        const joinedUsername = message.username || 'Player'
+        addChatMessage({
+          user: 'System',
+          message: `👋 ${joinedUsername} joined the table`,
+          timestamp: Date.now()
+        })
+        break
+
       default:
         logger.warn('Unknown message type', { type: message.type, payload: message.payload })
     }
