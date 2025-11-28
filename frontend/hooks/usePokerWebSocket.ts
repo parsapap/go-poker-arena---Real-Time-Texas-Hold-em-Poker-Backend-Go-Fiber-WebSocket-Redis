@@ -141,7 +141,21 @@ export function usePokerWebSocket({
         
         if (process.env.NODE_ENV === 'development') {
           logger.ws.disconnected()
-          logger.info(`WebSocket closed: code=${event.code}, reason=${event.reason}`)
+          logger.info(`WebSocket closed: code=${event.code}, reason=${event.reason || 'No reason'}`)
+          
+          // Log common close codes
+          const closeReasons: Record<number, string> = {
+            1000: 'Normal closure',
+            1001: 'Going away',
+            1002: 'Protocol error',
+            1003: 'Unsupported data',
+            1006: 'Abnormal closure (no close frame)',
+            1011: 'Server error',
+            1012: 'Service restart'
+          }
+          
+          const reasonText = closeReasons[event.code] || 'Unknown'
+          logger.warn(`Close code ${event.code}: ${reasonText}`)
         }
         
         onDisconnect?.()
@@ -399,6 +413,13 @@ export function usePokerWebSocket({
         // Heartbeat response
         break
 
+      case 'joined':
+        // Join confirmation from server
+        if (process.env.NODE_ENV === 'development') {
+          logger.info('Successfully joined room', message.data || message.payload)
+        }
+        break
+
       default:
         logger.warn('Unknown message type', { type: message.type, payload: message.payload })
     }
@@ -477,7 +498,8 @@ export function usePokerWebSocket({
     return () => {
       disconnect()
     }
-  }, [enabled, userId, username, connect, disconnect])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, userId, username, roomId])
 
   return {
     isConnected,
