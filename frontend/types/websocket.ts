@@ -8,6 +8,7 @@ export interface WebSocketMessage {
   user_id?: number
   username?: string
   payload?: any
+  data?: Record<string, any>
 }
 
 export interface JoinMessage extends WebSocketMessage {
