@@ -85,7 +85,7 @@ func (c *Client) ReadPump() {
 				if err := c.RoomManager.JoinRoom(roomID, c.UserID); err != nil {
 					log.Printf("[ERROR] Failed to join room: %v", err)
 					
-					// Send error to client
+					// Send error to client but keep connection alive
 					errorMsg := Message{
 						Type: "error",
 						Data: map[string]interface{}{
@@ -96,11 +96,10 @@ func (c *Client) ReadPump() {
 						select {
 						case c.Send <- data:
 						default:
-							close(c.Send)
-							return
+							log.Printf("[WARN] Could not send error message, channel full")
 						}
 					}
-					continue
+					continue // Skip to next message, don't send join confirmation
 				}
 			}
 			
@@ -120,8 +119,7 @@ func (c *Client) ReadPump() {
 				select {
 				case c.Send <- data:
 				default:
-					close(c.Send)
-					return
+					log.Printf("[WARN] Could not send join confirmation, channel full")
 				}
 			}
 			
