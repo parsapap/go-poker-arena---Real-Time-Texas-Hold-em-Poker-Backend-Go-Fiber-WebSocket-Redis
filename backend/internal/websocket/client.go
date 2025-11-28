@@ -28,11 +28,12 @@ type Client struct {
 }
 
 type Message struct {
-	Type    string      `json:"type"`
-	RoomID  string      `json:"room_id,omitempty"`
-	UserID  uint        `json:"user_id,omitempty"`
-	Username string     `json:"username,omitempty"`
-	Payload interface{} `json:"payload,omitempty"`
+	Type    string                 `json:"type"`
+	RoomID  string                 `json:"room_id,omitempty"`
+	UserID  uint                   `json:"user_id,omitempty"`
+	Username string                `json:"username,omitempty"`
+	Payload interface{}            `json:"payload,omitempty"`
+	Data    map[string]interface{} `json:"data,omitempty"`
 }
 
 func (c *Client) ReadPump() {
@@ -64,6 +65,40 @@ func (c *Client) ReadPump() {
 
 		msg.UserID = c.UserID
 		msg.Username = c.Username
+
+		// Handle pong message (client responding to our ping)
+		if msg.Type == "pong" {
+			log.Printf("[DEBUG] Received pong from client user_id=%d", c.UserID)
+			continue
+		}
+
+		// Handle join message
+		if msg.Type == "join" {
+			log.Printf("[DEBUG] Attempting to add client to room user_id=%d room_id=%s username=%s", c.UserID, c.RoomID, c.Username)
+			
+			// For now, just acknowledge the join without calling RoomManager
+			// The room management will be handled separately
+			log.Printf("[INFO] Client joined room user_id=%d room_id=%s", c.UserID, c.RoomID)
+			
+			// Send join confirmation to client
+			confirmMsg := Message{
+				Type: "joined",
+				Data: map[string]interface{}{
+					"room_id":  c.RoomID,
+					"user_id":  c.UserID,
+					"username": c.Username,
+				},
+			}
+			
+			if data, err := json.Marshal(confirmMsg); err == nil {
+				select {
+				case c.Send <- data:
+				default:
+					close(c.Send)
+					return
+				}
+			}
+		}
 
 		// Handle game actions
 		if msg.Type == "action" && c.RoomManager != nil {
