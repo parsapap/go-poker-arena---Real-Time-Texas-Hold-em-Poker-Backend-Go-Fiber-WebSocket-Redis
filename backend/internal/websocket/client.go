@@ -9,10 +9,10 @@ import (
 )
 
 const (
-	writeWait = 10 * time.Second
-	pongWait = 60 * time.Second
-	pingPeriod = (pongWait * 9) / 10
-	maxMessageSize = 512
+	writeWait      = 10 * time.Second
+	pongWait       = 120 * time.Second // Increased timeout
+	pingPeriod     = 30 * time.Second  // Send ping every 30s
+	maxMessageSize = 4096              // Increased for larger messages
 )
 
 type Client struct {
@@ -49,8 +49,10 @@ func (c *Client) ReadPump() {
 
 	log.Printf("[DEBUG] ReadPump started for user %d in room %s", c.UserID, c.RoomID)
 
+	c.Conn.SetReadLimit(maxMessageSize)
 	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.Conn.SetPongHandler(func(string) error {
+		log.Printf("[DEBUG] Received WebSocket pong from user %d", c.UserID)
 		c.Conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})
@@ -65,6 +67,9 @@ func (c *Client) ReadPump() {
 			break
 		}
 
+		// Reset deadline on ANY message received
+		c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+
 		var msg Message
 		if err := json.Unmarshal(message, &msg); err != nil {
 			log.Printf("error unmarshaling message: %v", err)
@@ -74,9 +79,23 @@ func (c *Client) ReadPump() {
 		msg.UserID = c.UserID
 		msg.Username = c.Username
 
-		// Handle pong message (client responding to our ping)
+		// Handle ping/pong messages (JSON-based heartbeat from client)
+		if msg.Type == "ping" {
+			log.Printf("[DEBUG] Received JSON ping from user %d", c.UserID)
+			// Respond with pong
+			pongMsg := Message{Type: "pong"}
+			if data, err := json.Marshal(pongMsg); err == nil {
+				select {
+				case c.Send <- data:
+					log.Printf("[DEBUG] Sent JSON pong to user %d", c.UserID)
+				default:
+					log.Printf("[WARN] Could not send pong to user %d, channel full", c.UserID)
+				}
+			}
+			continue
+		}
 		if msg.Type == "pong" {
-			log.Printf("[DEBUG] Received pong from client user_id=%d", c.UserID)
+			log.Printf("[DEBUG] Received JSON pong from user %d", c.UserID)
 			continue
 		}
 
@@ -183,9 +202,16 @@ func (c *Client) WritePump() {
 			}
 
 		case <-ticker.C:
+			log.Printf("[DEBUG] Sending ping to user %d", c.UserID)
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
+			// Send JSON ping instead of WebSocket protocol ping for browser compatibility
+			pingMsg := Message{Type: "ping"}
+			if data, err := json.Marshal(pingMsg); err == nil {
+				if err := c.Conn.WriteMessage(websocket.TextMessage, data); err != nil {
+					log.Printf("[ERROR] Failed to send ping to user %d: %v", c.UserID, err)
+					return
+				}
+				log.Printf("[DEBUG] Ping sent successfully to user %d", c.UserID)
 			}
 		}
 	}
