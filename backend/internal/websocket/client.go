@@ -157,6 +157,7 @@ func (c *Client) ReadPump() {
 				Username: c.Username,
 			}
 			c.Hub.Broadcast <- &joinedMsg
+			continue // Don't broadcast the original join message again
 		}
 
 		// Handle game actions
@@ -175,8 +176,20 @@ func (c *Client) ReadPump() {
 					log.Printf("error processing action: %v", err)
 				}
 			}
+			continue // Action is processed by RoomManager, don't broadcast raw action
 		}
 
+		// Only broadcast chat and other messages that need to be shared
+		if msg.Type == "chat" {
+			msg.RoomID = c.RoomID // Ensure room ID is set for chat messages
+			c.Hub.Broadcast <- &msg
+			continue
+		}
+
+		// For any other message types, broadcast to room
+		if msg.RoomID == "" {
+			msg.RoomID = c.RoomID
+		}
 		c.Hub.Broadcast <- &msg
 	}
 }

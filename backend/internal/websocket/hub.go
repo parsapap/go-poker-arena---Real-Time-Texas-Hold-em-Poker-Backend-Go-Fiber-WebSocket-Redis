@@ -71,16 +71,8 @@ func (h *Hub) Run() {
 			}
 
 		case message := <-h.Broadcast:
-			data, err := json.Marshal(message)
-			if err != nil {
-				log.Printf("error marshaling message: %v", err)
-				continue
-			}
-
-			if message.RoomID != "" {
-				h.Redis.Publish(ctx, "poker:broadcast", data)
-			}
-
+			// Only broadcast locally - Redis pub/sub is for multi-server scaling
+			// Using both causes duplicate messages
 			h.broadcastToRoom(message)
 		}
 	}
