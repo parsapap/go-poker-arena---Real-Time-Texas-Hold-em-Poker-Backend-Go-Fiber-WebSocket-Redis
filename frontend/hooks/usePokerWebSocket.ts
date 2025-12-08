@@ -32,6 +32,10 @@ export function usePokerWebSocket({
   const reconnectRef = useRef<NodeJS.Timeout | null>(null)
   const reconnectCountRef = useRef(0)
   const mountedRef = useRef(true)
+  
+  // Use ref for userId to avoid stale closure issues
+  const userIdRef = useRef(userId)
+  userIdRef.current = userId
 
   // Track if we've already connected with these params
   const connectedParamsRef = useRef<string>('')
@@ -113,40 +117,97 @@ export function usePokerWebSocket({
           }
           break
         case 'gameState':
-          if (msg.payload) {
-            const { players, communityCards, pot, currentBet, phase, currentPlayer, pots } = msg.payload
-            if (players) store.setPlayers(players)
-            if (communityCards) store.setCommunityCards(cardsToStrings(communityCards as BackendCard[]))
+          // Game state can be in msg.payload, msg.game, or msg.data
+          const gameData = msg.payload || (msg as any).game || msg.data
+          if (gameData) {
+            const { players, communityCards, community_cards, pot, currentBet, current_bet, phase, currentPlayer, current_position, pots } = gameData
+            logger.info(`gameState: phase=${phase}, current_position=${current_position}, players=${players?.length}`)
+            if (players) {
+              store.setPlayers(players)
+              logger.info(`gameState players: ${players.map((p: any) => `${p.id}:${p.username}`).join(', ')}`)
+            }
+            const cards = communityCards || community_cards
+            if (cards) store.setCommunityCards(cardsToStrings(cards as BackendCard[]))
             store.setPot(pots?.reduce((s: number, p: any) => s + (p.amount || 0), 0) ?? pot ?? 0)
-            store.setCurrentBet(currentBet || 0)
+            store.setCurrentBet(currentBet || current_bet || 0)
             store.setPhase(phase || 'waiting')
-            store.setMyTurn(currentPlayer === userId)
+            // current_position is index, need to check if it matches user
+            const currentPos = currentPlayer ?? current_position
+            if (players && currentPos !== undefined) {
+              const currentPlayerObj = players[currentPos]
+              const currentUserId = userIdRef.current
+              logger.info(`gameState turn: currentPos=${currentPos}, currentPlayer=${currentPlayerObj?.id}:${currentPlayerObj?.username}, userId=${currentUserId}, isMyTurn=${currentPlayerObj?.id === currentUserId}`)
+              store.setMyTurn(currentPlayerObj?.id === currentUserId)
+            }
           }
           break
         case 'deal':
-          if (msg.payload) {
-            const { holeCards, playerId, communityCards } = msg.payload
-            if (playerId === userId && holeCards) store.setHoleCards(cardsToStrings(holeCards as BackendCard[]))
-            if (communityCards) store.setCommunityCards(cardsToStrings(communityCards as BackendCard[]))
+          console.log('[DEAL] Raw message:', JSON.stringify(msg))
+          // Deal data can be in payload or at root level
+          const dealData = msg.payload || msg.data || msg
+          console.log('[DEAL] dealData:', JSON.stringify(dealData))
+          if (dealData) {
+            const { holeCards, hole_cards, playerId, player_id, communityCards, community_cards, phase } = dealData as any
+            const dealPlayerId = playerId || player_id
+            const dealHoleCards = holeCards || hole_cards
+            const currentUserId = userIdRef.current
+            console.log(`[DEAL] player_id=${dealPlayerId}, userId=${currentUserId}, match=${dealPlayerId == currentUserId}`)
+            console.log(`[DEAL] holeCards:`, dealHoleCards)
+            // Use == for loose comparison in case of type mismatch
+            if (dealPlayerId == currentUserId && dealHoleCards && dealHoleCards.length > 0) {
+              const convertedCards = cardsToStrings(dealHoleCards as BackendCard[])
+              console.log(`[DEAL] Setting hole cards:`, convertedCards)
+              store.setHoleCards(convertedCards)
+            }
+            const cards = communityCards || community_cards
+            if (cards) store.setCommunityCards(cardsToStrings(cards as BackendCard[]))
+            if (phase) store.setPhase(phase)
           }
           break
         case 'player_action':
         case 'playerAction':
-          if (msg.payload) {
-            const { playerId, player_id, action, amount, newPot, pot, game, newBet, current_bet } = msg.payload
-            store.updatePlayer({ id: playerId || player_id, lastAction: action, bet: amount })
-            const potVal = newPot ?? pot ?? game?.pots?.reduce((s: number, p: any) => s + (p.amount || 0), 0)
-            if (potVal !== undefined) store.setPot(potVal)
-            const betVal = newBet ?? current_bet ?? game?.current_bet
-            if (betVal !== undefined) store.setCurrentBet(betVal)
-            store.addChatMessage({ user: msg.username || 'Player', message: `${action}${amount ? ` ${amount}` : ''}`, timestamp: Date.now() })
+          // Data can be in payload or at root level
+          const actionData = msg.payload || msg
+          const actionPlayerId = (actionData as any).playerId || (actionData as any).player_id || (msg as any).player_id
+          const actionType = (actionData as any).action || (msg as any).action
+          const actionAmount = (actionData as any).amount || (msg as any).amount || 0
+          const actionGame = (actionData as any).game || (msg as any).game
+          
+          if (actionPlayerId) {
+            store.updatePlayer({ id: actionPlayerId, lastAction: actionType, bet: actionAmount })
+          }
+          
+          // Get username from game players or message
+          let actionUsername = msg.username
+          if (!actionUsername && actionGame?.players) {
+            const player = actionGame.players.find((p: any) => p.id === actionPlayerId)
+            actionUsername = player?.username
+          }
+          
+          // Update game state from the game object
+          if (actionGame) {
+            const { pots, current_bet, current_position, players } = actionGame
+            if (pots) store.setPot(pots.reduce((s: number, p: any) => s + (p.amount || 0), 0))
+            if (current_bet !== undefined) store.setCurrentBet(current_bet)
+            // Update whose turn it is
+            if (players && current_position !== undefined) {
+              const currentPlayer = players[current_position]
+              store.setMyTurn(currentPlayer?.id === userIdRef.current)
+            }
+          }
+          
+          if (actionType) {
+            store.addChatMessage({ user: actionUsername || 'Player', message: `${actionType}${actionAmount ? ` $${actionAmount}` : ''}`, timestamp: Date.now() })
           }
           break
         case 'phaseChange':
         case 'phase_change':
-          if (msg.payload) {
-            const { phase, communityCards, community_cards, pot, pots } = msg.payload
-            store.setPhase(phase)
+          // Phase data can be in payload or at root level
+          const phaseData = msg.payload || msg.data || msg
+          if (phaseData) {
+            const phase = (phaseData as any).phase || (msg as any).phase
+            if (phase) store.setPhase(phase)
+            const { communityCards, community_cards, pot, pots } = phaseData as any
             const cards = communityCards || community_cards
             if (cards) store.setCommunityCards(cardsToStrings(cards as BackendCard[]))
             const potVal = pots?.reduce((s: number, p: any) => s + (p.amount || 0), 0) ?? pot
@@ -161,16 +222,37 @@ export function usePokerWebSocket({
           }
           break
         case 'turn':
-          if (msg.payload) store.setMyTurn(msg.payload.playerId === userId)
+          if (msg.payload) store.setMyTurn(msg.payload.playerId === userIdRef.current)
           break
         case 'chat':
           if (msg.payload) store.addChatMessage({ user: msg.username || 'Anon', message: msg.payload.message, timestamp: Date.now() })
           break
         case 'error':
-          store.addChatMessage({ user: 'System', message: `⚠️ ${msg.payload?.message || 'Error'}`, timestamp: Date.now() })
+          const errorMsg = msg.payload?.message || msg.data?.message || (msg as any).message || 'Error'
+          store.addChatMessage({ user: 'System', message: `⚠️ ${errorMsg}`, timestamp: Date.now() })
           break
         case 'gameStarting':
-          store.addChatMessage({ user: 'System', message: `🎮 Game starting in ${msg.data?.countdown || msg.payload?.countdown}...`, timestamp: Date.now() })
+          // countdown can be at root level or in data/payload
+          logger.info('gameStarting message:', JSON.stringify(msg))
+          const countdown = (msg as any).countdown || msg.data?.countdown || msg.payload?.countdown
+          store.addChatMessage({ user: 'System', message: `🎮 Game starting in ${countdown}...`, timestamp: Date.now() })
+          break
+        case 'potUpdate':
+          const potUpdateData = msg.payload || msg.data || msg
+          if (potUpdateData) {
+            const { pot, current_bet, currentBet } = potUpdateData as any
+            if (pot !== undefined) store.setPot(pot)
+            if (current_bet !== undefined || currentBet !== undefined) store.setCurrentBet(current_bet || currentBet)
+          }
+          break
+        case 'playerTurn':
+          const turnData = msg.payload || msg.data || msg
+          if (turnData) {
+            const turnPlayerId = (turnData as any).player_id || (turnData as any).playerId
+            const currentUserId = userIdRef.current
+            logger.info(`playerTurn: player_id=${turnPlayerId}, userId=${currentUserId}, isMyTurn=${turnPlayerId === currentUserId}`)
+            store.setMyTurn(turnPlayerId === currentUserId)
+          }
           break
         case 'showdown':
           if (msg.payload?.players) store.setPlayers(msg.payload.players)
