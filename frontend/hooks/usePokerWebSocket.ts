@@ -186,9 +186,14 @@ export function usePokerWebSocket({
           
           // Update game state from the game object
           if (actionGame) {
-            const { pots, current_bet, current_position, players } = actionGame
+            const { pots, current_bet, current_position, players, community_cards, phase } = actionGame
             if (pots) store.setPot(pots.reduce((s: number, p: any) => s + (p.amount || 0), 0))
             if (current_bet !== undefined) store.setCurrentBet(current_bet)
+            // Update community cards if phase changed
+            if (community_cards && community_cards.length > 0) {
+              store.setCommunityCards(cardsToStrings(community_cards as BackendCard[]))
+            }
+            if (phase) store.setPhase(phase)
             // Update whose turn it is
             if (players && current_position !== undefined) {
               const currentPlayer = players[current_position]
@@ -256,6 +261,29 @@ export function usePokerWebSocket({
           break
         case 'showdown':
           if (msg.payload?.players) store.setPlayers(msg.payload.players)
+          break
+        case 'game_end':
+          // Handle game end with winners array
+          const gameEndData = msg.payload || msg.data || msg
+          const winners = (gameEndData as any).winners
+          if (winners && winners.length > 0) {
+            // Find the actual winner (player with best hand)
+            // For now, just take the first winner
+            const winner = winners[0]
+            const pot = store.pot
+            store.setWinner({ 
+              id: winner.player_id, 
+              name: winner.username, 
+              amount: pot,
+              hand: winner.hand 
+            })
+            store.addChatMessage({ 
+              user: 'System', 
+              message: `🏆 ${winner.username} wins with ${winner.hand}!`, 
+              timestamp: Date.now() 
+            })
+            store.setPhase('finished')
+          }
           break
       }
     }

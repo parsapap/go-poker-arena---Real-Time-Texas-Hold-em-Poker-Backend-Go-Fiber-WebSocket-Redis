@@ -334,19 +334,59 @@ func (m *Manager) ProcessAction(roomID, playerID uint, action string, amount int
 	})
 	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), actionData)
 
-	// 2. Broadcast whose turn it is next (if game is still active)
-	if game.Phase != poker.PhaseShowdown && game.Phase != poker.PhaseFinished {
-		currentPlayer := game.Players[game.CurrentPosition]
-		turnData, _ := json.Marshal(map[string]interface{}{
-			"type":      "playerTurn",
-			"room_id":   roomIDStr,
-			"player_id": currentPlayer.ID,
-			"username":  currentPlayer.Username,
-			"position":  game.CurrentPosition,
-		})
-		m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), turnData)
-		fmt.Printf("[ROOM %d] Turn switched to player %s (ID: %d, position: %d)\n", roomID, currentPlayer.Username, currentPlayer.ID, game.CurrentPosition)
+	// 2. Check if only one player remains (everyone else folded)
+	activePlayers := 0
+	var lastActivePlayer *poker.Player
+	for _, p := range game.Players {
+		if !p.Folded {
+			activePlayers++
+			lastActivePlayer = p
+		}
 	}
+	
+	if activePlayers == 1 && lastActivePlayer != nil {
+		// One player wins by fold - award pot
+		totalPot := int64(0)
+		for _, pot := range game.Pots {
+			totalPot += pot.Amount
+		}
+		lastActivePlayer.Chips += totalPot
+		
+		fmt.Printf("[ROOM %d] %s wins by fold! Pot: %d\n", roomID, lastActivePlayer.Username, totalPot)
+		
+		// End the round
+		m.EndRound(roomID)
+		return nil
+	}
+
+	// 3. Check if game ended (showdown or finished)
+	if game.Phase == poker.PhaseShowdown || game.Phase == poker.PhaseFinished {
+		// Broadcast showdown with all players' cards
+		showdownData, _ := json.Marshal(map[string]interface{}{
+			"type":            "showdown",
+			"room_id":         roomIDStr,
+			"community_cards": game.CommunityCards,
+			"players":         m.serializePlayersForShowdown(game),
+		})
+		m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), showdownData)
+		fmt.Printf("[ROOM %d] Showdown! Broadcasting all cards\n", roomID)
+
+		// End the round and broadcast winner
+		m.EndRound(roomID)
+		return nil
+	}
+
+	// 3. Broadcast whose turn it is next (if game is still active)
+	currentPlayer := game.Players[game.CurrentPosition]
+	turnData, _ := json.Marshal(map[string]interface{}{
+		"type":      "playerTurn",
+		"room_id":   roomIDStr,
+		"player_id": currentPlayer.ID,
+		"username":  currentPlayer.Username,
+		"position":  game.CurrentPosition,
+	})
+	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), turnData)
+	fmt.Printf("[ROOM %d] Turn switched to player %s (ID: %d, position: %d)\n", roomID, currentPlayer.Username, currentPlayer.ID, game.CurrentPosition)
 
 	return nil
 }
@@ -441,19 +481,78 @@ func (m *Manager) serializeGameState(game *poker.Game, forPlayerID uint) map[str
 	}
 }
 
+func (m *Manager) serializePlayersForShowdown(game *poker.Game) []map[string]interface{} {
+	players := make([]map[string]interface{}, len(game.Players))
+	for i, p := range game.Players {
+		player := map[string]interface{}{
+			"id":         p.ID,
+			"username":   p.Username,
+			"chips":      p.Chips,
+			"bet":        p.Bet,
+			"position":   p.Position,
+			"folded":     p.Folded,
+			"all_in":     p.AllIn,
+			"hole_cards": p.HoleCards, // Show all cards at showdown
+		}
+		
+		// Add hand evaluation for non-folded players
+		if !p.Folded {
+			allCards := append(p.HoleCards, game.CommunityCards...)
+			hand := poker.EvaluateHand(allCards)
+			player["hand"] = hand.Rank.String()
+			player["best_five"] = hand.BestFive
+		}
+		
+		players[i] = player
+	}
+	return players
+}
+
 func (m *Manager) getWinners(game *poker.Game) []map[string]interface{} {
 	winners := make([]map[string]interface{}, 0)
+	
+	// Find the best hand among non-folded players
+	var bestHand *poker.Hand
+	var bestPlayers []*poker.Player
+	
 	for _, player := range game.Players {
 		if !player.Folded {
 			allCards := append(player.HoleCards, game.CommunityCards...)
 			hand := poker.EvaluateHand(allCards)
-			winners = append(winners, map[string]interface{}{
-				"player_id": player.ID,
-				"username":  player.Username,
-				"hand":      hand.Rank.String(),
-				"cards":     hand.BestFive,
-			})
+			
+			if bestHand == nil {
+				bestHand = hand
+				bestPlayers = []*poker.Player{player}
+			} else {
+				cmp := poker.CompareHands(hand, bestHand)
+				if cmp > 0 {
+					bestHand = hand
+					bestPlayers = []*poker.Player{player}
+				} else if cmp == 0 {
+					bestPlayers = append(bestPlayers, player)
+				}
+			}
 		}
 	}
+	
+	// Calculate winnings per winner
+	totalPot := int64(0)
+	for _, pot := range game.Pots {
+		totalPot += pot.Amount
+	}
+	winAmount := totalPot / int64(len(bestPlayers))
+	
+	for _, player := range bestPlayers {
+		allCards := append(player.HoleCards, game.CommunityCards...)
+		hand := poker.EvaluateHand(allCards)
+		winners = append(winners, map[string]interface{}{
+			"player_id": player.ID,
+			"username":  player.Username,
+			"hand":      hand.Rank.String(),
+			"cards":     hand.BestFive,
+			"amount":    winAmount,
+		})
+	}
+	
 	return winners
 }
