@@ -37,6 +37,17 @@ function GamePageContent() {
     toggleSound
   } = useGameStore()
 
+  // Debug logging
+  useEffect(() => {
+    console.log('[DEBUG] Game state:', { 
+      players: players?.map(p => ({ id: p.id, username: p.username })),
+      holeCards,
+      phase,
+      myTurn,
+      userId: user?.id
+    })
+  }, [players, holeCards, phase, myTurn, user?.id])
+
   useEffect(() => {
     const token = localStorage.getItem('token')
     if (!token) {
@@ -276,11 +287,12 @@ function GamePageContent() {
           </div>
 
           {/* Player seats */}
-          {players && players.length > 0 && players.map((player, idx) => {
+          {players && players.length > 0 ? players.map((player, idx) => {
             if (!player || !seatPositions[idx]) return null
             const pos = seatPositions[idx]
             const isEmpty = player.chips === 0
             const isYou = player.id === user?.id
+            console.log(`[RENDER] Player ${player.id}:${player.username}, isYou=${isYou}, userId=${user?.id}, holeCards=${holeCards.length}`)
             
             return (
               <motion.div
@@ -362,7 +374,7 @@ function GamePageContent() {
                 </motion.div>
               </motion.div>
             )
-          })}
+          }) : <div className="text-white/50 text-center">No players yet...</div>}
         </div>
       </div>
 
