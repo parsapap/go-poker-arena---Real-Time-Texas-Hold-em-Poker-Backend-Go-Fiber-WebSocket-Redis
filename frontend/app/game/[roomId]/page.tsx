@@ -188,30 +188,32 @@ function GamePageContent() {
             style={{ boxShadow: '0 0 60px rgba(16, 185, 129, 0.2), inset 0 0 60px rgba(0,0,0,0.4)' }} />
           <div className="absolute inset-8 sm:inset-16 rounded-[40%] sm:rounded-[45%] border-2 border-amber-600/20" />
 
-          {/* Pot display */}
-          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}
-            className="absolute top-[30%] sm:top-[35%] left-1/2 -translate-x-1/2 z-20">
-            <div className="bg-black/40 backdrop-blur px-4 sm:px-6 py-2 sm:py-3 rounded-xl border border-amber-500/30">
-              <div className="text-[10px] sm:text-xs text-amber-400/70 text-center">POT</div>
-              <div className="text-xl sm:text-2xl font-bold text-amber-400 text-center">${pot}</div>
+          {/* Community Cards with Pot below */}
+          <div className="absolute top-[38%] sm:top-[40%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center">
+            {/* Cards */}
+            <div className="flex gap-1.5 sm:gap-2">
+              {communityCards.map((card, i) => (
+                <motion.div key={i} initial={{ rotateY: 180, scale: 0 }} animate={{ rotateY: 0, scale: 1 }}
+                  transition={{ delay: i * 0.1 }}
+                  className={`w-10 h-14 sm:w-14 sm:h-20 md:w-16 md:h-24 bg-white rounded-lg sm:rounded-xl shadow-lg flex items-center justify-center text-lg sm:text-2xl md:text-3xl font-bold border border-gray-200 ${
+                    card.includes('♥') || card.includes('♦') ? 'text-red-600' : 'text-gray-900'
+                  }`}>
+                  {card}
+                </motion.div>
+              ))}
+              {/* Empty card slots */}
+              {Array.from({ length: Math.max(0, 5 - communityCards.length) }).map((_, i) => (
+                <div key={`empty-${i}`} className="w-10 h-14 sm:w-14 sm:h-20 md:w-16 md:h-24 rounded-lg sm:rounded-xl border-2 border-dashed border-white/10" />
+              ))}
             </div>
-          </motion.div>
-
-          {/* Community Cards */}
-          <div className="absolute top-[45%] sm:top-[48%] left-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-1.5 sm:gap-2 z-10">
-            {communityCards.map((card, i) => (
-              <motion.div key={i} initial={{ rotateY: 180, scale: 0 }} animate={{ rotateY: 0, scale: 1 }}
-                transition={{ delay: i * 0.1 }}
-                className={`w-10 h-14 sm:w-14 sm:h-20 md:w-16 md:h-24 bg-white rounded-lg sm:rounded-xl shadow-lg flex items-center justify-center text-lg sm:text-2xl md:text-3xl font-bold border border-gray-200 ${
-                  card.includes('♥') || card.includes('♦') ? 'text-red-600' : 'text-gray-900'
-                }`}>
-                {card}
-              </motion.div>
-            ))}
-            {/* Empty card slots */}
-            {Array.from({ length: Math.max(0, 5 - communityCards.length) }).map((_, i) => (
-              <div key={`empty-${i}`} className="w-10 h-14 sm:w-14 sm:h-20 md:w-16 md:h-24 rounded-lg sm:rounded-xl border-2 border-dashed border-white/10" />
-            ))}
+            
+            {/* Pot display - below cards */}
+            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="mt-3 sm:mt-4">
+              <div className="bg-black/50 backdrop-blur-sm px-4 sm:px-6 py-1.5 sm:py-2 rounded-full border border-amber-500/30">
+                <span className="text-[10px] sm:text-xs text-amber-400/70 mr-2">POT</span>
+                <span className="text-lg sm:text-xl font-bold text-amber-400">${pot}</span>
+              </div>
+            </motion.div>
           </div>
 
           {/* Players */}
@@ -240,7 +242,10 @@ function GamePageContent() {
                     isYou ? 'border-emerald-500/50' : 'border-white/10'
                   }`}>
                     <div className="flex items-center gap-1.5 mb-1">
-                      <div className={`w-2 h-2 rounded-full ${player.isActive ? 'bg-green-400' : 'bg-gray-500'}`} />
+                      {/* Online indicator - light green when active/online */}
+                      <div className={`w-2.5 h-2.5 rounded-full ${
+                        player.isActive !== false ? 'bg-lime-400 shadow-sm shadow-lime-400/50' : 'bg-gray-500'
+                      }`} />
                       <span className="text-xs sm:text-sm font-medium truncate max-w-[80px]">
                         {isYou ? 'You' : player.username}
                       </span>
