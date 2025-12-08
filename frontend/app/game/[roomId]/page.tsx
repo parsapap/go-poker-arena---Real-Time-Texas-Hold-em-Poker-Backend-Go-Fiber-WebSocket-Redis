@@ -198,6 +198,66 @@ function GamePageContent() {
       {/* Chip rain for wins */}
       {showChipRain && <ChipRain />}
 
+      {/* Winner overlay */}
+      <AnimatePresence>
+        {winner && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.5, y: 50 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.5, y: 50 }}
+              className="glass p-8 rounded-2xl text-center max-w-md mx-4"
+            >
+              <motion.div
+                animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.1, 1] }}
+                transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 1 }}
+              >
+                <Trophy className="w-20 h-20 mx-auto text-yellow-400 mb-4" />
+              </motion.div>
+              
+              <h2 className="text-3xl font-bold mb-2">
+                {winner.id === user?.id ? '🎉 You Won!' : `${winner.name} Wins!`}
+              </h2>
+              
+              <p className="text-xl text-emerald-400 mb-2">
+                ${winner.amount}
+              </p>
+              
+              <p className="text-lg text-gray-300 mb-6">
+                {winner.hand}
+              </p>
+              
+              <div className="flex gap-4 justify-center">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => {
+                    useGameStore.getState().setWinner(null)
+                    useGameStore.getState().setPhase('waiting')
+                  }}
+                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-semibold"
+                >
+                  Play Again
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => router.push('/')}
+                  className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded-lg font-semibold"
+                >
+                  Leave Table
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Back button */}
       <motion.button
         initial={{ opacity: 0, x: -20 }}
@@ -279,7 +339,7 @@ function GamePageContent() {
                 className="relative group"
               >
                 <div className="absolute inset-0 bg-gradient-to-br from-amber-400/20 to-orange-500/20 blur-lg opacity-0 group-hover:opacity-100 transition-opacity rounded-xl" />
-                <div className="relative w-16 h-24 sm:w-20 sm:h-28 bg-white rounded-xl shadow-2xl flex items-center justify-center text-4xl sm:text-5xl border-2 border-white/20">
+                <div className={`relative w-16 h-24 sm:w-20 sm:h-28 bg-white rounded-xl shadow-2xl flex items-center justify-center text-4xl sm:text-5xl border-2 border-gray-200 font-bold ${card.includes('♥') || card.includes('♦') ? 'text-red-600' : 'text-gray-900'}`}>
                   {card || '🂠'}
                 </div>
               </motion.div>
@@ -343,15 +403,15 @@ function GamePageContent() {
 
                         {/* Player cards - only show to owner */}
                         {isYou && holeCards.length > 0 && (
-                          <div className="flex gap-1 mt-2 justify-center">
+                          <div className="flex gap-3 mt-4 justify-center">
                             {holeCards.map((card, i) => (
                               <motion.div
                                 key={i}
                                 initial={{ rotateY: 180, scale: 0 }}
                                 animate={{ rotateY: 0, scale: 1 }}
                                 transition={{ delay: 0.5 + i * 0.1, type: 'spring' }}
-                                whileHover={{ y: -5, scale: 1.1 }}
-                                className="w-10 h-14 bg-white rounded-lg shadow-lg flex items-center justify-center text-2xl cursor-pointer"
+                                whileHover={{ y: -10, scale: 1.1 }}
+                                className={`w-20 h-28 sm:w-24 sm:h-36 bg-white rounded-2xl shadow-2xl flex items-center justify-center text-4xl sm:text-5xl cursor-pointer border-3 border-gray-300 font-bold ${card.includes('♥') || card.includes('♦') ? 'text-red-600' : 'text-gray-900'}`}
                               >
                                 {card}
                               </motion.div>
@@ -359,11 +419,11 @@ function GamePageContent() {
                           </div>
                         )}
                         {!isYou && player.cards && player.cards.length > 0 && (
-                          <div className="flex gap-1 mt-2 justify-center">
+                          <div className="flex gap-3 mt-4 justify-center">
                             {player.cards.map((card, i) => (
                               <div
                                 key={i}
-                                className="w-10 h-14 bg-gradient-to-br from-blue-900 to-blue-950 rounded-lg shadow-lg border-2 border-white/20"
+                                className="w-20 h-28 sm:w-24 sm:h-36 bg-gradient-to-br from-blue-900 to-blue-950 rounded-2xl shadow-2xl border-3 border-white/30"
                               />
                             ))}
                           </div>

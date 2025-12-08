@@ -260,26 +260,42 @@ export function usePokerWebSocket({
           }
           break
         case 'showdown':
-          if (msg.payload?.players) store.setPlayers(msg.payload.players)
+          // Showdown data can be at root level or in payload
+          const showdownData = msg.payload || msg.data || msg
+          console.log('[SHOWDOWN] Raw message:', JSON.stringify(msg))
+          if (showdownData) {
+            const players = (showdownData as any).players
+            const communityCards = (showdownData as any).community_cards
+            if (players) {
+              store.setPlayers(players)
+              console.log('[SHOWDOWN] Updated players with hole cards')
+            }
+            if (communityCards) {
+              store.setCommunityCards(cardsToStrings(communityCards as BackendCard[]))
+            }
+            store.setPhase('showdown')
+          }
           break
         case 'game_end':
           // Handle game end with winners array
           const gameEndData = msg.payload || msg.data || msg
+          console.log('[GAME_END] Raw message:', JSON.stringify(msg))
           const winners = (gameEndData as any).winners
+          console.log('[GAME_END] Winners:', winners)
           if (winners && winners.length > 0) {
             // Find the actual winner (player with best hand)
-            // For now, just take the first winner
             const winner = winners[0]
-            const pot = store.pot
+            const winAmount = winner.amount || store.pot
+            console.log('[GAME_END] Winner:', winner.username, 'Hand:', winner.hand, 'Amount:', winAmount)
             store.setWinner({ 
               id: winner.player_id, 
               name: winner.username, 
-              amount: pot,
+              amount: winAmount,
               hand: winner.hand 
             })
             store.addChatMessage({ 
               user: 'System', 
-              message: `🏆 ${winner.username} wins with ${winner.hand}!`, 
+              message: `🏆 ${winner.username} wins $${winAmount} with ${winner.hand}!`, 
               timestamp: Date.now() 
             })
             store.setPhase('finished')
