@@ -47,25 +47,39 @@
 
 ## ⚡ Quick Start
 
+### Using Docker (Recommended)
+
 ```bash
+# Clone the repository
 git clone https://github.com/parsapap/go-poker-arena.git
 cd go-poker-arena
-docker-compose up
+
+# Start all services (backend, frontend, PostgreSQL, Redis)
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
 ```
 
-- Backend: `http://localhost:8080`
-- Frontend: `http://localhost:3000`
+**Access:**
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8080
+
+**Stop:**
+```bash
+docker-compose down
+```
 
 ---
 
-## �F Features
+## 🎮 Features
 
 | Feature | Description |
 |---------|-------------|
 | 🃏 Full Poker Rules | Pre-flop, Flop, Turn, River, Showdown |
 | 🎯 All Actions | Fold, Check, Call, Raise, All-in |
 | 🏆 Hand Rankings | Royal Flush to High Card |
-| �  Real-time | WebSocket with auto-reconnect |
+| 🔄 Real-time | WebSocket with auto-reconnect |
 | 👥 Multiplayer | Up to 9 players per table |
 | 🔒 Secure | JWT auth, rate limiting, anti-cheat |
 | 📱 Responsive | Mobile and desktop support |
@@ -103,11 +117,12 @@ go-poker-arena/
 
 ---
 
-## 🚀 Development
+## 🚀 Development (Without Docker)
 
 **Backend:**
 ```bash
 cd backend
+cp .env.example .env    # Configure database & Redis
 go mod download
 go run cmd/server/main.go
 ```
@@ -115,6 +130,7 @@ go run cmd/server/main.go
 **Frontend:**
 ```bash
 cd frontend
+cp .env.local.example .env.local
 npm install
 npm run dev
 ```
@@ -124,17 +140,16 @@ npm run dev
 ## 🧪 Testing
 
 ```bash
+# Run all backend tests
 cd backend
 go test ./... -v
+
+# Run with coverage
+go test ./... -cover
+
+# Run specific package tests
+go test ./internal/poker/... -v
 ```
-
----
-
-## 📚 Docs
-
-- [API Reference](docs/API.md)
-- [Deployment Guide](docs/DEPLOYMENT.md)
-- [Security](docs/SECURITY.md)
 
 ---
 
