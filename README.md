@@ -19,17 +19,17 @@
 
 <div align="center">
 
-| Login | Sign Up |
+| Login | GamePlay |
 |:---:|:---:|
-| ![Login](screenShots/login.png) | ![Sign Up](screenShots/signup.png) |
+| ![Login](screenShots/game2.png) | ![Sign Up](screenShots/signup.png) |
 
-| Lobby | Game Table |
+| Winner | Lobby |
 |:---:|:---:|
 | ![Lobby](screenShots/lobby.png) | ![Game](screenShots/game1.png) |
 
-| Gameplay |
+| Gameplay + Chat |
 |:---:|
-| ![Gameplay](screenShots/game2.png) |
+| ![Gameplay](screenShots/login.png) |
 
 </div>
 
