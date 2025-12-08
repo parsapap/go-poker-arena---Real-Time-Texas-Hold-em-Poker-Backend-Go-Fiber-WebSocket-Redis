@@ -49,6 +49,9 @@ type Message struct {
 	Action         string                 `json:"action,omitempty"`
 	Amount         int64                  `json:"amount,omitempty"`
 	CurrentBet     int64                  `json:"current_bet,omitempty"`
+	// Showdown/Game end fields
+	Winners        interface{}            `json:"winners,omitempty"`
+	Players        interface{}            `json:"players,omitempty"`
 }
 
 func (c *Client) ReadPump() {
