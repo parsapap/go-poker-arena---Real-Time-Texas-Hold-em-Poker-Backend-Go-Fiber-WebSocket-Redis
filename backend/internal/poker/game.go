@@ -46,20 +46,22 @@ type Pot struct {
 }
 
 type Game struct {
-	ID              uint        `json:"id"`
-	RoomID          uint        `json:"room_id"`
-	Phase           GamePhase   `json:"phase"`
-	Deck            *Deck       `json:"-"`
-	CommunityCards  []Card      `json:"community_cards"`
-	Players         []*Player   `json:"players"`
-	Pots            []Pot       `json:"pots"`
-	CurrentBet      int64       `json:"current_bet"`
-	MinRaise        int64       `json:"min_raise"`
-	SmallBlind      int64       `json:"small_blind"`
-	BigBlind        int64       `json:"big_blind"`
-	DealerPosition  int         `json:"dealer_position"`
-	CurrentPosition int         `json:"current_position"`
-	LastRaiseAmount int64       `json:"last_raise_amount"`
+	ID                    uint        `json:"id"`
+	RoomID                uint        `json:"room_id"`
+	Phase                 GamePhase   `json:"phase"`
+	Deck                  *Deck       `json:"-"`
+	CommunityCards        []Card      `json:"community_cards"`
+	Players               []*Player   `json:"players"`
+	Pots                  []Pot       `json:"pots"`
+	CurrentBet            int64       `json:"current_bet"`
+	MinRaise              int64       `json:"min_raise"`
+	SmallBlind            int64       `json:"small_blind"`
+	BigBlind              int64       `json:"big_blind"`
+	DealerPosition        int         `json:"dealer_position"`
+	CurrentPosition       int         `json:"current_position"`
+	LastRaiseAmount       int64       `json:"last_raise_amount"`
+	LastAggressorPosition int         `json:"last_aggressor_position"` // Position of last raiser/bettor
+	ActionsThisRound      int         `json:"actions_this_round"`      // Count of actions in current betting round
 }
 
 func NewGame(roomID uint, players []*Player, smallBlind, bigBlind int64) *Game {
@@ -108,7 +110,10 @@ func (g *Game) Start() error {
 		}
 	}
 
+	// Preflop: action starts after BB, BB is the last aggressor (posted blind)
 	g.CurrentPosition = (bbPos + 1) % len(g.Players)
+	g.LastAggressorPosition = bbPos // BB is considered the aggressor preflop
+	g.ActionsThisRound = 0
 	return nil
 }
 
@@ -138,12 +143,28 @@ func (g *Game) NextPhase() error {
 
 	g.CurrentBet = 0
 	g.MinRaise = g.BigBlind
-	g.CurrentPosition = (g.DealerPosition + 1) % len(g.Players)
+	g.ActionsThisRound = 0
 
 	// Reset player bets for new round
 	for _, player := range g.Players {
 		player.Bet = 0
 	}
+
+	// Set position to first active player after dealer
+	// Post-flop, action starts with first active player left of dealer
+	g.CurrentPosition = (g.DealerPosition + 1) % len(g.Players)
+	
+	// Find first active (non-folded, non-all-in) player
+	for i := 0; i < len(g.Players); i++ {
+		player := g.Players[g.CurrentPosition]
+		if !player.Folded && !player.AllIn {
+			break
+		}
+		g.CurrentPosition = (g.CurrentPosition + 1) % len(g.Players)
+	}
+	
+	// No aggressor yet in new betting round (no one has bet/raised)
+	g.LastAggressorPosition = -1
 
 	return nil
 }
@@ -196,6 +217,7 @@ func (g *Game) ProcessAction(playerID uint, action Action, amount int64) error {
 		g.LastRaiseAmount = amount
 		g.CurrentBet = player.Bet
 		g.MinRaise = amount
+		g.LastAggressorPosition = g.CurrentPosition // Raiser becomes aggressor
 
 	case ActionAllIn:
 		allInAmount := player.Chips
@@ -207,9 +229,11 @@ func (g *Game) ProcessAction(playerID uint, action Action, amount int64) error {
 			g.LastRaiseAmount = player.Bet - g.CurrentBet
 			g.CurrentBet = player.Bet
 			g.MinRaise = g.LastRaiseAmount
+			g.LastAggressorPosition = g.CurrentPosition // All-in raise becomes aggressor
 		}
 	}
 
+	g.ActionsThisRound++
 	g.moveToNextPlayer()
 
 	// Check if betting round is complete
@@ -383,19 +407,37 @@ func (g *Game) moveToNextPlayer() {
 }
 
 func (g *Game) isBettingRoundComplete() bool {
+	// Count active players (not folded, not all-in)
 	activePlayers := 0
-	playersActed := 0
-
 	for _, player := range g.Players {
-		if !player.Folded {
+		if !player.Folded && !player.AllIn {
 			activePlayers++
-			if player.Bet == g.CurrentBet || player.AllIn {
-				playersActed++
+		}
+	}
+
+	// If only one or zero active players, round is complete
+	if activePlayers <= 1 {
+		return true
+	}
+
+	// Check if all active players have matched the current bet
+	allMatched := true
+	for _, player := range g.Players {
+		if !player.Folded && !player.AllIn {
+			if player.Bet != g.CurrentBet {
+				allMatched = false
+				break
 			}
 		}
 	}
 
-	return activePlayers <= 1 || playersActed == activePlayers
+	if !allMatched {
+		return false
+	}
+
+	// All players have matched the current bet.
+	// Round is complete when everyone has had a chance to act.
+	return g.ActionsThisRound >= activePlayers
 }
 
 func (g *Game) GetPlayer(playerID uint) *Player {
