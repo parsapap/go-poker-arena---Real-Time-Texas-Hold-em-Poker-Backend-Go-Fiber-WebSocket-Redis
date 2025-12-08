@@ -17,6 +17,7 @@ import (
 	"go-poker-arena/internal/matchmaking"
 	"go-poker-arena/internal/metrics"
 	"go-poker-arena/internal/middleware"
+	"go-poker-arena/internal/models"
 	"go-poker-arena/internal/poker"
 	"go-poker-arena/internal/rooms"
 	"go-poker-arena/internal/websocket"
@@ -248,7 +249,22 @@ func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 		metrics.ActiveRooms.Set(float64(len(rooms)))
-		return c.JSON(rooms)
+		
+		// Add player counts
+		type RoomWithCount struct {
+			models.Room
+			PlayerCount int `json:"player_count"`
+		}
+		roomsWithCounts := make([]RoomWithCount, len(rooms))
+		for i, room := range rooms {
+			players, _ := roomManager.GetRoomPlayers(room.ID)
+			roomsWithCounts[i] = RoomWithCount{
+				Room:        room,
+				PlayerCount: len(players),
+			}
+		}
+		
+		return c.JSON(roomsWithCounts)
 	})
 
 	api.Get("/rooms/:id", func(c *fiber.Ctx) error {
