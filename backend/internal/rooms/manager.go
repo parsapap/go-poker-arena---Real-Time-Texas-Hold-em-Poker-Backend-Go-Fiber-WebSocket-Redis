@@ -153,7 +153,7 @@ func (m *Manager) StartGameCountdown(roomID uint) {
 	for i := 3; i > 0; i-- {
 		countdownData, _ := json.Marshal(map[string]interface{}{
 			"type":      "gameStarting",
-			"room_id":   roomID,
+			"room_id":   fmt.Sprintf("%d", roomID), // String for WebSocket hub
 			"countdown": i,
 			"message":   fmt.Sprintf("Game starting in %d...", i),
 		})
@@ -171,7 +171,7 @@ func (m *Manager) StartGameCountdown(roomID uint) {
 		// Broadcast error
 		errorData, _ := json.Marshal(map[string]interface{}{
 			"type":    "error",
-			"room_id": roomID,
+			"room_id": fmt.Sprintf("%d", roomID),
 			"message": fmt.Sprintf("Failed to start game: %v", err),
 		})
 		m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), errorData)
@@ -238,20 +238,26 @@ func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
 
 	ctx := context.Background()
 	
-	// 1. Broadcast deal (hole cards sent privately in hub)
-	dealData, _ := json.Marshal(map[string]interface{}{
-		"type":            "deal",
-		"room_id":         roomID,
-		"phase":           game.Phase,
-		"community_cards": game.CommunityCards,
-	})
-	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), dealData)
-	fmt.Printf("[ROOM %d] Broadcast: deal (phase=%s)\n", roomID, game.Phase)
+	roomIDStr := fmt.Sprintf("%d", roomID)
+	
+	// 1. Send hole cards to each player privately
+	for _, player := range game.Players {
+		dealData, _ := json.Marshal(map[string]interface{}{
+			"type":            "deal",
+			"room_id":         roomIDStr,
+			"phase":           game.Phase,
+			"community_cards": game.CommunityCards,
+			"player_id":       player.ID,
+			"hole_cards":      player.HoleCards,
+		})
+		m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), dealData)
+		fmt.Printf("[ROOM %d] Sent deal to player %d with %d cards\n", roomID, player.ID, len(player.HoleCards))
+	}
 
 	// 2. Broadcast phase change
 	phaseData, _ := json.Marshal(map[string]interface{}{
 		"type":    "phaseChange",
-		"room_id": roomID,
+		"room_id": roomIDStr,
 		"phase":   game.Phase,
 	})
 	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), phaseData)
@@ -260,7 +266,7 @@ func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
 	// 3. Broadcast pot update
 	potData, _ := json.Marshal(map[string]interface{}{
 		"type":        "potUpdate",
-		"room_id":     roomID,
+		"room_id":     roomIDStr,
 		"pot":         game.Pots[0].Amount,
 		"current_bet": game.CurrentBet,
 	})
@@ -271,7 +277,7 @@ func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
 	currentPlayer := game.Players[game.CurrentPosition]
 	turnData, _ := json.Marshal(map[string]interface{}{
 		"type":      "playerTurn",
-		"room_id":   roomID,
+		"room_id":   roomIDStr,
 		"player_id": currentPlayer.ID,
 		"username":  currentPlayer.Username,
 		"position":  game.CurrentPosition,
@@ -282,7 +288,7 @@ func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
 	// 5. Broadcast full game state
 	gameStateData, _ := json.Marshal(map[string]interface{}{
 		"type":    "gameState",
-		"room_id": roomID,
+		"room_id": roomIDStr,
 		"game":    m.serializeGameState(game, 0),
 	})
 	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), gameStateData)
@@ -318,7 +324,7 @@ func (m *Manager) ProcessAction(roomID, playerID uint, action string, amount int
 	ctx := context.Background()
 	actionData, _ := json.Marshal(map[string]interface{}{
 		"type":      "player_action",
-		"room_id":   roomID,
+		"room_id":   fmt.Sprintf("%d", roomID),
 		"player_id": playerID,
 		"action":    action,
 		"amount":    amount,
@@ -343,7 +349,7 @@ func (m *Manager) DealCards(roomID uint) error {
 	ctx := context.Background()
 	dealData, _ := json.Marshal(map[string]interface{}{
 		"type":            "deal",
-		"room_id":         roomID,
+		"room_id":         fmt.Sprintf("%d", roomID),
 		"phase":           game.Phase,
 		"community_cards": game.CommunityCards,
 	})
@@ -378,7 +384,7 @@ func (m *Manager) EndRound(roomID uint) error {
 	ctx := context.Background()
 	endData, _ := json.Marshal(map[string]interface{}{
 		"type":    "game_end",
-		"room_id": roomID,
+		"room_id": fmt.Sprintf("%d", roomID),
 		"winners": m.getWinners(game),
 	})
 	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), endData)
