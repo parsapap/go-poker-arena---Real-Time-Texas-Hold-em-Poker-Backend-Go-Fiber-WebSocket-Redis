@@ -116,9 +116,19 @@ export const useGameStore = create<GameState>((set) => ({
   setWinner: (winner) => set({ winner }),
 
   addChatMessage: (message) =>
-    set((state) => ({
-      chatMessages: [...state.chatMessages, message].slice(-100) // Keep last 100 messages
-    })),
+    set((state) => {
+      // Deduplicate: skip if same user+message within 500ms
+      const lastMsg = state.chatMessages[state.chatMessages.length - 1]
+      if (lastMsg && 
+          lastMsg.user === message.user && 
+          lastMsg.message === message.message && 
+          message.timestamp - lastMsg.timestamp < 500) {
+        return state // Skip duplicate
+      }
+      return {
+        chatMessages: [...state.chatMessages, message].slice(-100)
+      }
+    }),
 
   clearChat: () => set({ chatMessages: [] }),
 
