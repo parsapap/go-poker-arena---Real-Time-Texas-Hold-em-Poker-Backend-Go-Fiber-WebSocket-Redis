@@ -17,6 +17,16 @@ interface User {
   losses: number
 }
 
+interface UserStats {
+  user_id: number
+  username: string
+  chips: number
+  wins: number
+  losses: number
+  total_games: number
+  win_rate: number
+}
+
 interface Room {
   id: number
   name: string
@@ -30,6 +40,7 @@ interface Room {
 export default function LobbyPage() {
   const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
+  const [userStats, setUserStats] = useState<UserStats | null>(null)
   const [rooms, setRooms] = useState<Room[]>([])
   const [loading, setLoading] = useState(true)
   const [activePlayers, setActivePlayers] = useState(0)
@@ -37,6 +48,40 @@ export default function LobbyPage() {
 
   // Animated chip counter
   const [displayChips, setDisplayChips] = useState(0)
+
+  // Fetch user stats from API
+  const fetchUserStats = async (userId: number) => {
+    try {
+      const token = localStorage.getItem('token')
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+      const response = await fetch(`${apiUrl}/api/users/${userId}/stats`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+      
+      if (response.ok) {
+        const stats = await response.json()
+        setUserStats(stats)
+        // Update user chips from fresh stats
+        if (stats.chips !== undefined) {
+          setUser(prev => prev ? { ...prev, chips: stats.chips, wins: stats.wins, losses: stats.losses } : null)
+          setDisplayChips(stats.chips)
+          // Update localStorage with fresh data
+          const userData = localStorage.getItem('user')
+          if (userData) {
+            const parsedUser = JSON.parse(userData)
+            parsedUser.chips = stats.chips
+            parsedUser.wins = stats.wins
+            parsedUser.losses = stats.losses
+            localStorage.setItem('user', JSON.stringify(parsedUser))
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch user stats:', error)
+    }
+  }
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -50,13 +95,18 @@ export default function LobbyPage() {
       const parsedUser = JSON.parse(userData)
       setUser(parsedUser)
       setDisplayChips(parsedUser.chips)
+      // Fetch fresh stats from API
+      fetchUserStats(parsedUser.id)
     }
 
     fetchRooms()
     setupWebSocket()
 
-    // Refresh rooms every 10 seconds
-    const interval = setInterval(fetchRooms, 10000)
+    // Refresh rooms and stats every 10 seconds
+    const interval = setInterval(() => {
+      fetchRooms()
+      if (user?.id) fetchUserStats(user.id)
+    }, 10000)
 
     return () => {
       clearInterval(interval)
@@ -142,7 +192,11 @@ export default function LobbyPage() {
       
       if (response.ok) {
         const data = await response.json()
-        setRooms(Array.isArray(data) ? data : [])
+        const roomsData = Array.isArray(data) ? data : []
+        setRooms(roomsData)
+        // Calculate active players from room player counts
+        const totalPlayers = roomsData.reduce((sum: number, room: Room) => sum + (room.player_count || 0), 0)
+        setActivePlayers(totalPlayers)
       } else {
         setRooms([])
       }
@@ -243,8 +297,16 @@ export default function LobbyPage() {
   }
 
   const calculateWinRate = () => {
+    // Use userStats if available (from API), otherwise fall back to user data
+    if (userStats) {
+      return Math.round(userStats.win_rate)
+    }
     if (!user || (user.wins + user.losses) === 0) return 0
     return Math.round((user.wins / (user.wins + user.losses)) * 100)
+  }
+
+  const getWins = () => {
+    return userStats?.wins ?? user?.wins ?? 0
   }
 
   if (!user) return null
@@ -328,7 +390,7 @@ export default function LobbyPage() {
             value={activePlayers || '...'}
             pulse
           />
-          <StatCard icon={<TrendingUp />} label="Your Wins" value={user.wins} />
+          <StatCard icon={<TrendingUp />} label="Your Wins" value={getWins()} />
           <StatCard icon={<TrendingUp />} label="Win Rate" value={`${calculateWinRate()}%`} />
         </motion.div>
 
