@@ -320,17 +320,33 @@ func (m *Manager) ProcessAction(roomID, playerID uint, action string, amount int
 		return err
 	}
 
-	// Publish action event
 	ctx := context.Background()
+	roomIDStr := fmt.Sprintf("%d", roomID)
+
+	// 1. Publish action event
 	actionData, _ := json.Marshal(map[string]interface{}{
 		"type":      "player_action",
-		"room_id":   fmt.Sprintf("%d", roomID),
+		"room_id":   roomIDStr,
 		"player_id": playerID,
 		"action":    action,
 		"amount":    amount,
 		"game":      m.serializeGameState(game, 0),
 	})
 	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), actionData)
+
+	// 2. Broadcast whose turn it is next (if game is still active)
+	if game.Phase != poker.PhaseShowdown && game.Phase != poker.PhaseFinished {
+		currentPlayer := game.Players[game.CurrentPosition]
+		turnData, _ := json.Marshal(map[string]interface{}{
+			"type":      "playerTurn",
+			"room_id":   roomIDStr,
+			"player_id": currentPlayer.ID,
+			"username":  currentPlayer.Username,
+			"position":  game.CurrentPosition,
+		})
+		m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), turnData)
+		fmt.Printf("[ROOM %d] Turn switched to player %s (ID: %d, position: %d)\n", roomID, currentPlayer.Username, currentPlayer.ID, game.CurrentPosition)
+	}
 
 	return nil
 }
