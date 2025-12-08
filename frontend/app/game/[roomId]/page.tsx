@@ -4,12 +4,12 @@ import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useParams, useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
-import { ArrowLeft, Send, Trophy, Sparkles, Volume2, VolumeX } from 'lucide-react'
+import { ArrowLeft, Send, Trophy, Volume2, VolumeX, MessageCircle, X } from 'lucide-react'
 import { usePokerWebSocket } from '@/hooks/usePokerWebSocket'
 import { useGameStore } from '@/store/gameStore'
 import { soundManager } from '@/lib/sounds'
 import { ToastContainer } from '@/components/Toast'
-import { ReconnectionOverlay, ConnectionStatus } from '@/components/ReconnectionOverlay'
+import { ReconnectionOverlay } from '@/components/ReconnectionOverlay'
 import { ChipRain } from '@/components/ChipRain'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import type { Toast, ToastType } from '@/types/toast'
@@ -22,67 +22,35 @@ function GamePageContent() {
   const [chatInput, setChatInput] = useState('')
   const [toasts, setToasts] = useState<Toast[]>([])
   const [showChipRain, setShowChipRain] = useState(false)
+  const [showChat, setShowChat] = useState(false)
 
   const {
-    players,
-    communityCards,
-    holeCards,
-    phase,
-    pot,
-    currentBet,
-    myTurn,
-    winner,
-    chatMessages,
-    soundEnabled,
-    toggleSound
+    players, communityCards, holeCards, phase, pot, currentBet,
+    myTurn, winner, chatMessages, soundEnabled, toggleSound
   } = useGameStore()
-
-  // Debug logging
-  useEffect(() => {
-    console.log('[DEBUG] Game state:', { 
-      players: players?.map(p => ({ id: p.id, username: p.username })),
-      holeCards,
-      phase,
-      myTurn,
-      userId: user?.id
-    })
-  }, [players, holeCards, phase, myTurn, user?.id])
 
   useEffect(() => {
     const token = localStorage.getItem('token')
-    if (!token) {
-      router.push('/login')
-      return
-    }
-
+    if (!token) { router.push('/login'); return }
     const userData = localStorage.getItem('user')
-    if (userData) {
-      setUser(JSON.parse(userData))
-    }
+    if (userData) setUser(JSON.parse(userData))
   }, [router])
 
-  // Only initialize WebSocket after user data is loaded
   const { isConnected, isReconnecting, sendAction, sendChat, reconnect } = usePokerWebSocket({
     roomId: params.roomId as string,
     userId: user?.id || 0,
     username: user?.username || '',
-    enabled: !!user, // Only connect when user is loaded
-    onConnect: () => {
-      addToast('success', 'Connected to game')
-    },
-    onDisconnect: () => {
-      addToast('error', 'Disconnected from game')
-    }
+    enabled: !!user,
+    onConnect: () => addToast('success', 'Connected to game'),
+    onDisconnect: () => addToast('error', 'Disconnected from game')
   })
 
-  // Watch for winner and trigger celebrations
   useEffect(() => {
     if (winner) {
       if (winner.id === user?.id) {
         addToast('win', `🎉 You won $${winner.amount} with ${winner.hand}!`)
         setShowChipRain(true)
         if (soundEnabled) soundManager.playWinFanfare()
-        
         setTimeout(() => setShowChipRain(false), 4000)
       } else {
         addToast('info', `${winner.name} won $${winner.amount}`)
@@ -90,37 +58,15 @@ function GamePageContent() {
     }
   }, [winner, user?.id, soundEnabled])
 
-  // Play sounds for game events
-  useEffect(() => {
-    if (communityCards.length > 0 && soundEnabled) {
-      soundManager.playCardDeal()
-    }
-  }, [communityCards.length, soundEnabled])
-
-  const addToast = (type: ToastType, message: string, duration?: number) => {
-    const id = Date.now().toString()
-    const toast: Toast = {
-      id,
-      type,
-      message,
-      duration: duration || 3000,
-      timestamp: Date.now()
-    }
-    setToasts((prev) => [...prev, toast])
-  }
-
-  const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id))
+  const addToast = (type: ToastType, message: string) => {
+    setToasts(prev => [...prev, { id: Date.now().toString(), type, message, duration: 3000, timestamp: Date.now() }])
   }
 
   const handleAction = (action: string, amount?: number) => {
     sendAction(action, amount)
     if (soundEnabled) {
-      if (action === 'raise' || action === 'call' || action === 'bet') {
-        soundManager.playChipStack()
-      } else {
-        soundManager.playButtonClick()
-      }
+      if (['raise', 'call', 'bet'].includes(action)) soundManager.playChipStack()
+      else soundManager.playButtonClick()
     }
   }
 
@@ -130,438 +76,292 @@ function GamePageContent() {
     setChatInput('')
   }
 
-  // Show loading state while user data is being loaded
   if (!user) {
     return (
-      <div className="fixed inset-0 bg-black flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-emerald-500 mx-auto mb-4"></div>
-          <p className="text-white/60">Loading game...</p>
-        </div>
+      <div className="fixed inset-0 bg-gradient-to-br from-gray-900 to-black flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-emerald-500"></div>
       </div>
     )
   }
 
-  const seatPositions = [
-    { x: '50%', y: '85%', transform: 'translate(-50%, -50%)' },
-    { x: '15%', y: '70%', transform: 'translate(-50%, -50%)' },
-    { x: '5%', y: '40%', transform: 'translate(-50%, -50%)' },
-    { x: '15%', y: '15%', transform: 'translate(-50%, -50%)' },
-    { x: '40%', y: '5%', transform: 'translate(-50%, -50%)' },
-    { x: '60%', y: '5%', transform: 'translate(-50%, -50%)' },
-    { x: '85%', y: '15%', transform: 'translate(-50%, -50%)' },
-    { x: '95%', y: '40%', transform: 'translate(-50%, -50%)' },
-  ]
+  // Responsive seat positions - different for mobile vs desktop
+  const getPlayerPosition = (idx: number, total: number) => {
+    // For 2 players: opponent at top, you at bottom
+    if (total <= 2) {
+      const positions = [
+        { left: '50%', top: '75%' }, // You (bottom)
+        { left: '50%', top: '8%' },  // Opponent (top)
+      ]
+      return positions[idx] || positions[0]
+    }
+    // For more players, distribute around table
+    const angle = (idx / Math.max(total, 6)) * 2 * Math.PI - Math.PI / 2
+    const radiusX = 42
+    const radiusY = 38
+    return {
+      left: `${50 + radiusX * Math.cos(angle)}%`,
+      top: `${50 + radiusY * Math.sin(angle)}%`
+    }
+  }
 
   return (
-    <div className="fixed inset-0 bg-black overflow-hidden">
-      {/* Background */}
-      <div className="absolute inset-0 bg-gradient-to-br from-emerald-950 via-green-950 to-teal-950" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-900/20 via-transparent to-transparent" />
-      
+    <div className="fixed inset-0 bg-gradient-to-br from-gray-900 via-emerald-950 to-gray-900 overflow-hidden">
       <Navbar chips={user?.chips || 5000} />
+      
+      {/* Top bar with controls */}
+      <div className="fixed top-16 left-0 right-0 z-40 px-3 py-2 flex justify-between items-center">
+        <motion.button
+          whileTap={{ scale: 0.95 }}
+          onClick={() => router.push('/')}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 backdrop-blur text-sm"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span className="hidden sm:inline">Lobby</span>
+        </motion.button>
 
-      {/* Connection Status Badge - Top Right */}
-      <motion.div
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        className="fixed top-24 right-4 z-50"
-      >
-        <div className={`
-          px-4 py-2 rounded-full flex items-center gap-2 text-sm font-medium
-          ${isConnected ? 'bg-green-500/20 border-green-500/50 text-green-400' : 
-            isReconnecting ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-400' : 
-            'bg-red-500/20 border-red-500/50 text-red-400'}
-          border-2 backdrop-blur-sm
-        `}>
-          <motion.div
-            animate={isConnected ? { scale: [1, 1.2, 1] } : {}}
-            transition={{ duration: 2, repeat: Infinity }}
-            className={`w-2 h-2 rounded-full ${
-              isConnected ? 'bg-green-400' : 
-              isReconnecting ? 'bg-yellow-400 animate-pulse' : 
-              'bg-red-400'
-            }`}
-          />
-          <span>
-            {isConnected ? 'Connected' : isReconnecting ? 'Connecting...' : 'Disconnected'}
-          </span>
-        </div>
-      </motion.div>
-
-      {/* Reconnection overlay */}
-      <ReconnectionOverlay isReconnecting={isReconnecting} onRetry={reconnect} />
-
-      {/* Toast notifications */}
-      <ToastContainer toasts={toasts} onClose={removeToast} />
-
-      {/* Chip rain for wins */}
-      {showChipRain && <ChipRain />}
-
-      {/* Winner overlay */}
-      <AnimatePresence>
-        {winner && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-          >
-            <motion.div
-              initial={{ scale: 0.5, y: 50 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.5, y: 50 }}
-              className="glass p-8 rounded-2xl text-center max-w-md mx-4"
-            >
-              <motion.div
-                animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.1, 1] }}
-                transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 1 }}
-              >
-                <Trophy className="w-20 h-20 mx-auto text-yellow-400 mb-4" />
-              </motion.div>
-              
-              <h2 className="text-3xl font-bold mb-2">
-                {winner.id === user?.id ? '🎉 You Won!' : `${winner.name} Wins!`}
-              </h2>
-              
-              <p className="text-xl text-emerald-400 mb-2">
-                ${winner.amount}
-              </p>
-              
-              <p className="text-lg text-gray-300 mb-6">
-                {winner.hand}
-              </p>
-              
-              <div className="flex gap-4 justify-center">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => {
-                    useGameStore.getState().setWinner(null)
-                    useGameStore.getState().setPhase('waiting')
-                  }}
-                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-semibold"
-                >
-                  Play Again
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => router.push('/')}
-                  className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded-lg font-semibold"
-                >
-                  Leave Table
-                </motion.button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Back button */}
-      <motion.button
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        whileHover={{ scale: 1.05 }}
-        onClick={() => router.push('/')}
-        className="fixed top-20 left-4 z-50 glass px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-white/10"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        <span className="hidden sm:inline">Lobby</span>
-      </motion.button>
-
-      {/* Sound toggle */}
-      <motion.button
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        whileHover={{ scale: 1.05 }}
-        onClick={() => {
-          toggleSound()
-          soundManager.setEnabled(!soundEnabled)
-        }}
-        className="fixed top-20 right-4 z-50 glass p-3 rounded-lg hover:bg-white/10"
-      >
-        {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-      </motion.button>
-
-      {/* Main poker table */}
-      <div className="absolute inset-0 flex items-center justify-center p-4 pt-20">
-        <div className="relative w-full max-w-7xl aspect-[16/10]">
-          
-          {/* Table felt */}
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="absolute inset-0 rounded-[50%] bg-gradient-to-br from-emerald-900 via-green-900 to-teal-900 shadow-2xl"
-            style={{
-              boxShadow: '0 0 100px rgba(16, 185, 129, 0.3), inset 0 0 100px rgba(0,0,0,0.5)'
-            }}
-          />
-          
-          <div className="absolute inset-8 rounded-[50%] border-4 border-amber-600/30 shadow-inner" />
-          <div className="absolute inset-12 rounded-[50%] border-2 border-amber-500/20" />
-
-          {/* Center pot */}
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
-          >
-            <motion.div
-              animate={{ scale: [1, 1.05, 1] }}
-              transition={{ duration: 2, repeat: Infinity }}
-              className="relative"
-            >
-              <div className="absolute inset-0 bg-amber-500/20 blur-xl rounded-full" />
-              <div className="relative glass px-8 py-4 rounded-2xl border-2 border-amber-500/30">
-                <div className="text-xs text-amber-400/80 mb-1 text-center font-semibold tracking-wider">POT</div>
-                <motion.div
-                  key={pot}
-                  initial={{ scale: 1.5, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  className="text-3xl font-bold text-amber-400 text-center"
-                >
-                  ${pot.toLocaleString()}
-                </motion.div>
-              </div>
-            </motion.div>
-          </motion.div>
-
-          {/* Community cards */}
-          <div className="absolute top-[55%] left-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-3 z-10">
-            {communityCards && communityCards.length > 0 && communityCards.map((card, i) => (
-              <motion.div
-                key={i}
-                initial={{ rotateY: 180, y: -100, opacity: 0 }}
-                animate={{ rotateY: 0, y: 0, opacity: 1 }}
-                transition={{ delay: i * 0.15, type: 'spring', stiffness: 200 }}
-                whileHover={{ y: -10, scale: 1.05 }}
-                className="relative group"
-              >
-                <div className="absolute inset-0 bg-gradient-to-br from-amber-400/20 to-orange-500/20 blur-lg opacity-0 group-hover:opacity-100 transition-opacity rounded-xl" />
-                <div className={`relative w-16 h-24 sm:w-20 sm:h-28 bg-white rounded-xl shadow-2xl flex items-center justify-center text-4xl sm:text-5xl border-2 border-gray-200 font-bold ${card.includes('♥') || card.includes('♦') ? 'text-red-600' : 'text-gray-900'}`}>
-                  {card || '🂠'}
-                </div>
-              </motion.div>
-            ))}
+        <div className="flex items-center gap-2">
+          {/* Connection status */}
+          <div className={`px-2.5 py-1 rounded-full text-xs flex items-center gap-1.5 ${
+            isConnected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+          }`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} />
+            <span className="hidden sm:inline">{isConnected ? 'Live' : 'Offline'}</span>
           </div>
 
-          {/* Player seats */}
-          {players && players.length > 0 ? players.map((player, idx) => {
-            if (!player || !seatPositions[idx]) return null
-            const pos = seatPositions[idx]
-            const isEmpty = player.chips === 0
-            const isYou = player.id === user?.id
-            console.log(`[RENDER] Player ${player.id}:${player.username}, isYou=${isYou}, userId=${user?.id}, holeCards=${holeCards.length}`)
-            
-            return (
-              <motion.div
-                key={player.id}
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: isEmpty ? 0.3 : 1 }}
-                transition={{ delay: idx * 0.1 }}
-                className="absolute z-30"
-                style={{ left: pos.x, top: pos.y, transform: pos.transform }}
-              >
-                <motion.div
-                  animate={isYou && myTurn ? { 
-                    boxShadow: ['0 0 20px rgba(16, 185, 129, 0.5)', '0 0 40px rgba(16, 185, 129, 0.8)', '0 0 20px rgba(16, 185, 129, 0.5)']
-                  } : {}}
-                  transition={{ duration: 1.5, repeat: Infinity }}
-                  className={`relative glass rounded-2xl p-3 min-w-[140px] ${
-                    player.isFolded ? 'opacity-40' : ''
-                  } ${isEmpty ? 'border-dashed border-white/20' : 'border-2 border-white/30'}`}
-                >
-                  {winner?.id === player.id && (
-                    <motion.div
-                      animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }}
-                      transition={{ duration: 1, repeat: Infinity }}
-                      className="absolute -inset-1 bg-gradient-to-r from-amber-400 to-yellow-500 rounded-2xl blur-xl"
-                    />
-                  )}
+          {/* Sound toggle */}
+          <button onClick={() => { toggleSound(); soundManager.setEnabled(!soundEnabled) }}
+            className="p-2 rounded-lg bg-white/10 backdrop-blur">
+            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+          </button>
 
-                  <div className="relative">
-                    {isEmpty ? (
-                      <div className="text-center text-white/40 text-sm py-2">Empty Seat</div>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className={`w-2 h-2 rounded-full ${player.isActive ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
-                          <div className="font-bold text-sm truncate">{player.username}</div>
-                        </div>
-                        <div className="text-amber-400 font-bold text-lg">${player.chips.toLocaleString()}</div>
-                        
-                        {player.bet > 0 && (
-                          <motion.div
-                            initial={{ scale: 0 }}
-                            animate={{ scale: 1 }}
-                            className="absolute -top-8 left-1/2 -translate-x-1/2 glass px-3 py-1 rounded-lg text-xs font-bold text-amber-400"
-                          >
-                            ${player.bet}
-                          </motion.div>
-                        )}
-
-                        {/* Player cards - only show to owner */}
-                        {isYou && holeCards.length > 0 && (
-                          <div className="flex gap-3 mt-4 justify-center">
-                            {holeCards.map((card, i) => (
-                              <motion.div
-                                key={i}
-                                initial={{ rotateY: 180, scale: 0 }}
-                                animate={{ rotateY: 0, scale: 1 }}
-                                transition={{ delay: 0.5 + i * 0.1, type: 'spring' }}
-                                whileHover={{ y: -10, scale: 1.1 }}
-                                className={`w-20 h-28 sm:w-24 sm:h-36 bg-white rounded-2xl shadow-2xl flex items-center justify-center text-4xl sm:text-5xl cursor-pointer border-3 border-gray-300 font-bold ${card.includes('♥') || card.includes('♦') ? 'text-red-600' : 'text-gray-900'}`}
-                              >
-                                {card}
-                              </motion.div>
-                            ))}
-                          </div>
-                        )}
-                        {!isYou && player.cards && player.cards.length > 0 && (
-                          <div className="flex gap-3 mt-4 justify-center">
-                            {player.cards.map((card, i) => (
-                              <div
-                                key={i}
-                                className="w-20 h-28 sm:w-24 sm:h-36 bg-gradient-to-br from-blue-900 to-blue-950 rounded-2xl shadow-2xl border-3 border-white/30"
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </motion.div>
-              </motion.div>
-            )
-          }) : <div className="text-white/50 text-center">No players yet...</div>}
+          {/* Chat toggle (mobile) */}
+          <button onClick={() => setShowChat(!showChat)}
+            className="p-2 rounded-lg bg-white/10 backdrop-blur lg:hidden relative">
+            <MessageCircle className="w-4 h-4" />
+            {chatMessages.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full text-[10px] flex items-center justify-center">
+                {chatMessages.length > 9 ? '9+' : chatMessages.length}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Action bar */}
-      <AnimatePresence>
-        {myTurn && (
-          <motion.div
-            initial={{ y: 100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-0 left-0 right-0 z-40 pb-4 px-4"
-          >
-            <div className="max-w-4xl mx-auto glass rounded-2xl p-4 border-2 border-emerald-500/30">
-              <div className="mb-4">
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-white/60">Raise Amount</span>
-                  <span className="text-amber-400 font-bold">${raiseAmount}</span>
-                </div>
-                <input
-                  type="range"
-                  min={Math.max((currentBet || 0) * 2, 10)}
-                  max={user?.chips || 5000}
-                  step="50"
-                  value={raiseAmount}
-                  onChange={(e) => setRaiseAmount(Number(e.target.value))}
-                  className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer slider"
-                />
-                <div className="flex justify-between text-xs text-white/40 mt-1">
-                  <button onClick={() => setRaiseAmount(Math.max((currentBet || 0) * 2, 20))} className="hover:text-white">2x</button>
-                  <button onClick={() => setRaiseAmount(Math.max((currentBet || 0) * 3, 30))} className="hover:text-white">3x</button>
-                  <button onClick={() => setRaiseAmount(Math.max(pot || 0, 50))} className="hover:text-white">Pot</button>
-                  <button onClick={() => setRaiseAmount(user?.chips || 5000)} className="hover:text-white">All-in</button>
-                </div>
-              </div>
+      <ReconnectionOverlay isReconnecting={isReconnecting} onRetry={reconnect} />
+      <ToastContainer toasts={toasts} onClose={(id) => setToasts(prev => prev.filter(t => t.id !== id))} />
+      {showChipRain && <ChipRain />}
 
-              <div className="grid grid-cols-3 gap-3">
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => handleAction('fold')}
-                  className="py-4 rounded-xl font-bold bg-red-500/20 hover:bg-red-500/30 border-2 border-red-500/50 text-red-400"
-                >
-                  Fold
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => handleAction((currentBet || 0) > 0 ? 'call' : 'check')}
-                  className="py-4 rounded-xl font-bold glass hover:bg-white/10 border-2 border-white/30"
-                >
-                  {(currentBet || 0) > 0 ? `Call $${currentBet || 0}` : 'Check'}
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => handleAction('raise', raiseAmount)}
-                  className="py-4 rounded-xl font-bold bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/50"
-                >
-                  Raise ${raiseAmount}
-                </motion.button>
+      {/* Winner Modal */}
+      <AnimatePresence>
+        {winner && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <motion.div initial={{ scale: 0.8, y: 20 }} animate={{ scale: 1, y: 0 }}
+              className="bg-gradient-to-br from-gray-800 to-gray-900 p-6 sm:p-8 rounded-2xl text-center max-w-sm w-full border border-amber-500/30">
+              <Trophy className="w-16 h-16 mx-auto text-amber-400 mb-4" />
+              <h2 className="text-2xl sm:text-3xl font-bold mb-2">
+                {winner.id === user?.id ? '🎉 You Won!' : `${winner.name} Wins!`}
+              </h2>
+              <p className="text-2xl text-emerald-400 font-bold mb-1">${winner.amount}</p>
+              <p className="text-gray-400 mb-6">{winner.hand}</p>
+              <div className="flex gap-3">
+                <button onClick={() => { useGameStore.getState().setWinner(null); useGameStore.getState().setPhase('waiting') }}
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-semibold transition">
+                  Play Again
+                </button>
+                <button onClick={() => router.push('/')}
+                  className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 rounded-xl font-semibold transition">
+                  Leave
+                </button>
               </div>
-            </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Chat sidebar */}
-      <motion.div
-        initial={{ x: 300, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        className="fixed right-4 top-24 bottom-24 w-72 glass rounded-2xl p-4 hidden lg:flex flex-col z-40"
-      >
-        <h3 className="font-bold mb-3 text-sm text-white/60">CHAT</h3>
-        <div className="flex-1 overflow-y-auto space-y-2 mb-3">
-          {chatMessages && chatMessages.length > 0 && chatMessages.map((msg, i) => (
-            <div key={i} className="text-sm">
-              <span className="text-emerald-400 font-semibold">{msg.user}:</span>
-              <span className="text-white/80 ml-2">{msg.message}</span>
-            </div>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSendChat()}
-            placeholder="Type message..."
-            className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500/50"
-          />
-          <button
-            onClick={handleSendChat}
-            className="glass p-2 rounded-lg hover:bg-white/10"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </div>
-      </motion.div>
+      {/* Main Game Area */}
+      <div className="absolute inset-0 pt-28 pb-4 px-2 sm:px-4 flex flex-col">
+        {/* Poker Table */}
+        <div className="flex-1 relative max-w-5xl mx-auto w-full">
+          {/* Table background */}
+          <div className="absolute inset-4 sm:inset-8 rounded-[40%] sm:rounded-[45%] bg-gradient-to-br from-emerald-800 via-green-800 to-teal-800 shadow-2xl"
+            style={{ boxShadow: '0 0 60px rgba(16, 185, 129, 0.2), inset 0 0 60px rgba(0,0,0,0.4)' }} />
+          <div className="absolute inset-8 sm:inset-16 rounded-[40%] sm:rounded-[45%] border-2 border-amber-600/20" />
 
-      <style jsx>{`
-        .slider::-webkit-slider-thumb {
-          appearance: none;
-          width: 20px;
-          height: 20px;
-          border-radius: 50%;
-          background: linear-gradient(135deg, #10b981, #14b8a6);
-          cursor: pointer;
-          box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
-        }
-        .slider::-moz-range-thumb {
-          width: 20px;
-          height: 20px;
-          border-radius: 50%;
-          background: linear-gradient(135deg, #10b981, #14b8a6);
-          cursor: pointer;
-          box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
-          border: none;
-        }
-      `}</style>
+          {/* Pot display */}
+          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}
+            className="absolute top-[30%] sm:top-[35%] left-1/2 -translate-x-1/2 z-20">
+            <div className="bg-black/40 backdrop-blur px-4 sm:px-6 py-2 sm:py-3 rounded-xl border border-amber-500/30">
+              <div className="text-[10px] sm:text-xs text-amber-400/70 text-center">POT</div>
+              <div className="text-xl sm:text-2xl font-bold text-amber-400 text-center">${pot}</div>
+            </div>
+          </motion.div>
+
+          {/* Community Cards */}
+          <div className="absolute top-[45%] sm:top-[48%] left-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-1.5 sm:gap-2 z-10">
+            {communityCards.map((card, i) => (
+              <motion.div key={i} initial={{ rotateY: 180, scale: 0 }} animate={{ rotateY: 0, scale: 1 }}
+                transition={{ delay: i * 0.1 }}
+                className={`w-10 h-14 sm:w-14 sm:h-20 md:w-16 md:h-24 bg-white rounded-lg sm:rounded-xl shadow-lg flex items-center justify-center text-lg sm:text-2xl md:text-3xl font-bold border border-gray-200 ${
+                  card.includes('♥') || card.includes('♦') ? 'text-red-600' : 'text-gray-900'
+                }`}>
+                {card}
+              </motion.div>
+            ))}
+            {/* Empty card slots */}
+            {Array.from({ length: Math.max(0, 5 - communityCards.length) }).map((_, i) => (
+              <div key={`empty-${i}`} className="w-10 h-14 sm:w-14 sm:h-20 md:w-16 md:h-24 rounded-lg sm:rounded-xl border-2 border-dashed border-white/10" />
+            ))}
+          </div>
+
+          {/* Players */}
+          {players.map((player, idx) => {
+            const pos = getPlayerPosition(idx, players.length)
+            const isYou = player.id === user?.id
+            
+            return (
+              <motion.div key={player.id} initial={{ scale: 0 }} animate={{ scale: 1 }}
+                transition={{ delay: idx * 0.1 }}
+                className="absolute z-30 -translate-x-1/2 -translate-y-1/2"
+                style={{ left: pos.left, top: pos.top }}>
+                
+                <div className={`relative ${isYou && myTurn ? 'ring-2 ring-emerald-400 ring-offset-2 ring-offset-transparent' : ''} 
+                  ${player.isFolded ? 'opacity-40' : ''} rounded-xl`}>
+                  
+                  {/* Player bet */}
+                  {player.bet > 0 && (
+                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-amber-500/20 px-2 py-0.5 rounded text-xs text-amber-400 font-bold">
+                      ${player.bet}
+                    </div>
+                  )}
+
+                  {/* Player info card */}
+                  <div className={`bg-gray-800/90 backdrop-blur rounded-xl p-2 sm:p-3 min-w-[100px] sm:min-w-[120px] border ${
+                    isYou ? 'border-emerald-500/50' : 'border-white/10'
+                  }`}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <div className={`w-2 h-2 rounded-full ${player.isActive ? 'bg-green-400' : 'bg-gray-500'}`} />
+                      <span className="text-xs sm:text-sm font-medium truncate max-w-[80px]">
+                        {isYou ? 'You' : player.username}
+                      </span>
+                    </div>
+                    <div className="text-amber-400 font-bold text-sm sm:text-base">${player.chips}</div>
+                  </div>
+
+                  {/* Hole cards for current player */}
+                  {isYou && holeCards.length > 0 && (
+                    <div className="flex gap-1.5 mt-2 justify-center">
+                      {holeCards.map((card, i) => (
+                        <motion.div key={i} initial={{ rotateY: 180 }} animate={{ rotateY: 0 }}
+                          transition={{ delay: 0.3 + i * 0.1 }}
+                          className={`w-12 h-[68px] sm:w-16 sm:h-[88px] md:w-20 md:h-28 bg-white rounded-lg sm:rounded-xl shadow-xl flex items-center justify-center text-xl sm:text-3xl md:text-4xl font-bold border-2 border-gray-200 ${
+                            card.includes('♥') || card.includes('♦') ? 'text-red-600' : 'text-gray-900'
+                          }`}>
+                          {card}
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Face-down cards for opponents */}
+                  {!isYou && !player.isFolded && phase !== 'waiting' && (
+                    <div className="flex gap-1 mt-2 justify-center">
+                      <div className="w-8 h-11 sm:w-10 sm:h-14 bg-gradient-to-br from-blue-800 to-blue-900 rounded-lg border border-white/20" />
+                      <div className="w-8 h-11 sm:w-10 sm:h-14 bg-gradient-to-br from-blue-800 to-blue-900 rounded-lg border border-white/20" />
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )
+          })}
+        </div>
+
+        {/* Action Bar */}
+        <AnimatePresence>
+          {myTurn && (
+            <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
+              className="mt-auto bg-gray-900/95 backdrop-blur rounded-t-2xl sm:rounded-2xl p-3 sm:p-4 mx-auto w-full max-w-lg border-t sm:border border-white/10">
+              
+              {/* Raise slider */}
+              <div className="mb-3">
+                <div className="flex justify-between text-xs sm:text-sm mb-1.5">
+                  <span className="text-gray-400">Raise</span>
+                  <span className="text-amber-400 font-bold">${raiseAmount}</span>
+                </div>
+                <input type="range" min={Math.max((currentBet || 0) * 2, 20)} max={user?.chips || 1000} step="10"
+                  value={raiseAmount} onChange={(e) => setRaiseAmount(Number(e.target.value))}
+                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                <div className="flex justify-between text-[10px] sm:text-xs text-gray-500 mt-1">
+                  <button onClick={() => setRaiseAmount(Math.max((currentBet || 0) * 2, 20))} className="hover:text-white">Min</button>
+                  <button onClick={() => setRaiseAmount(Math.max(pot || 50, 50))} className="hover:text-white">Pot</button>
+                  <button onClick={() => setRaiseAmount(user?.chips || 1000)} className="hover:text-white">All-in</button>
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="grid grid-cols-3 gap-2">
+                <motion.button whileTap={{ scale: 0.95 }} onClick={() => handleAction('fold')}
+                  className="py-3 sm:py-4 rounded-xl font-bold text-sm sm:text-base bg-red-500/20 border border-red-500/50 text-red-400 active:bg-red-500/30">
+                  Fold
+                </motion.button>
+                <motion.button whileTap={{ scale: 0.95 }} onClick={() => handleAction(currentBet > 0 ? 'call' : 'check')}
+                  className="py-3 sm:py-4 rounded-xl font-bold text-sm sm:text-base bg-gray-700 border border-gray-600 active:bg-gray-600">
+                  {currentBet > 0 ? `Call $${currentBet}` : 'Check'}
+                </motion.button>
+                <motion.button whileTap={{ scale: 0.95 }} onClick={() => handleAction('raise', raiseAmount)}
+                  className="py-3 sm:py-4 rounded-xl font-bold text-sm sm:text-base bg-emerald-600 active:bg-emerald-500 shadow-lg shadow-emerald-500/30">
+                  Raise
+                </motion.button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Chat Panel - Desktop sidebar / Mobile overlay */}
+      <AnimatePresence>
+        {(showChat || typeof window !== 'undefined' && window.innerWidth >= 1024) && (
+          <motion.div initial={{ x: 300, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 300, opacity: 0 }}
+            className={`fixed z-50 bg-gray-900/95 backdrop-blur border-l border-white/10 flex flex-col
+              ${showChat ? 'inset-0 pt-16' : 'hidden lg:flex right-0 top-28 bottom-4 w-72 rounded-l-2xl'}`}>
+            
+            {/* Chat header */}
+            <div className="flex items-center justify-between p-3 border-b border-white/10">
+              <h3 className="font-semibold text-sm">Chat</h3>
+              <button onClick={() => setShowChat(false)} className="lg:hidden p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {chatMessages.map((msg, i) => (
+                <div key={i} className="text-sm">
+                  <span className="text-emerald-400 font-medium">{msg.user}:</span>
+                  <span className="text-gray-300 ml-1.5">{msg.message}</span>
+                </div>
+              ))}
+              {chatMessages.length === 0 && (
+                <p className="text-gray-500 text-sm text-center py-4">No messages yet</p>
+              )}
+            </div>
+
+            {/* Input */}
+            <div className="p-3 border-t border-white/10 flex gap-2">
+              <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSendChat()}
+                placeholder="Message..." className="flex-1 bg-gray-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+              <button onClick={handleSendChat} className="p-2 bg-emerald-600 rounded-lg hover:bg-emerald-500">
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
 
 export default function GamePage() {
-  return (
-    <ErrorBoundary>
-      <GamePageContent />
-    </ErrorBoundary>
-  )
+  return <ErrorBoundary><GamePageContent /></ErrorBoundary>
 }
