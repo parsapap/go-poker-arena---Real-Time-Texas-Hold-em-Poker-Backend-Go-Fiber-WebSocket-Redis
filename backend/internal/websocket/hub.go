@@ -29,9 +29,12 @@ func NewHub(redisClient *redis.Client) *Hub {
 
 func (h *Hub) Run() {
 	ctx := context.Background()
-	pubsub := h.Redis.Subscribe(ctx, "poker:broadcast")
+	
+	// Subscribe to room-specific channels using pattern subscription
+	pubsub := h.Redis.PSubscribe(ctx, "room:*")
 	defer pubsub.Close()
 
+	// Handle Redis messages from room channels (game events from RoomManager)
 	go func() {
 		for msg := range pubsub.Channel() {
 			var message Message
@@ -39,6 +42,7 @@ func (h *Hub) Run() {
 				log.Printf("error unmarshaling redis message: %v", err)
 				continue
 			}
+			log.Printf("[HUB] Received Redis message type=%s room=%s", message.Type, message.RoomID)
 			h.broadcastToRoom(&message)
 		}
 	}()
