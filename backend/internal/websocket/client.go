@@ -29,12 +29,26 @@ type Client struct {
 }
 
 type Message struct {
-	Type    string                 `json:"type"`
-	RoomID  string                 `json:"room_id,omitempty"`
-	UserID  uint                   `json:"user_id,omitempty"`
-	Username string                `json:"username,omitempty"`
-	Payload interface{}            `json:"payload,omitempty"`
-	Data    map[string]interface{} `json:"data,omitempty"`
+	Type      string                 `json:"type"`
+	RoomID    string                 `json:"room_id,omitempty"`
+	UserID    uint                   `json:"user_id,omitempty"`
+	Username  string                 `json:"username,omitempty"`
+	Payload   interface{}            `json:"payload,omitempty"`
+	Data      map[string]interface{} `json:"data,omitempty"`
+	// Game event fields
+	Countdown      int                    `json:"countdown,omitempty"`
+	Message        string                 `json:"message,omitempty"`
+	Phase          string                 `json:"phase,omitempty"`
+	Pot            int64                  `json:"pot,omitempty"`
+	Game           interface{}            `json:"game,omitempty"`
+	// Deal fields
+	PlayerID       uint                   `json:"player_id,omitempty"`
+	HoleCards      interface{}            `json:"hole_cards,omitempty"`
+	CommunityCards interface{}            `json:"community_cards,omitempty"`
+	// Action fields
+	Action         string                 `json:"action,omitempty"`
+	Amount         int64                  `json:"amount,omitempty"`
+	CurrentBet     int64                  `json:"current_bet,omitempty"`
 }
 
 func (c *Client) ReadPump() {
@@ -161,22 +175,43 @@ func (c *Client) ReadPump() {
 		}
 
 		// Handle game actions
-		if msg.Type == "action" && c.RoomManager != nil {
+		if msg.Type == "action" {
+			log.Printf("[DEBUG] Received action from user %d: %+v", c.UserID, msg.Payload)
+			
+			if c.RoomManager == nil {
+				log.Printf("[ERROR] RoomManager is nil for user %d", c.UserID)
+				continue
+			}
+			
 			var roomID uint
 			fmt.Sscanf(c.RoomID, "%d", &roomID)
 			
 			if payload, ok := msg.Payload.(map[string]interface{}); ok {
-				action := payload["action"].(string)
+				action, _ := payload["action"].(string)
 				amount := int64(0)
 				if amt, ok := payload["amount"].(float64); ok {
 					amount = int64(amt)
 				}
 				
+				log.Printf("[DEBUG] Processing action: room=%d user=%d action=%s amount=%d", roomID, c.UserID, action, amount)
+				
 				if err := c.RoomManager.ProcessAction(roomID, c.UserID, action, amount); err != nil {
-					log.Printf("error processing action: %v", err)
+					log.Printf("[ERROR] ProcessAction failed: %v", err)
+					// Send error back to client
+					errorMsg := Message{
+						Type: "error",
+						Data: map[string]interface{}{
+							"message": fmt.Sprintf("Action failed: %v", err),
+						},
+					}
+					if data, err := json.Marshal(errorMsg); err == nil {
+						c.Send <- data
+					}
 				}
+			} else {
+				log.Printf("[ERROR] Invalid payload format: %T", msg.Payload)
 			}
-			continue // Action is processed by RoomManager, don't broadcast raw action
+			continue
 		}
 
 		// Only broadcast chat and other messages that need to be shared
