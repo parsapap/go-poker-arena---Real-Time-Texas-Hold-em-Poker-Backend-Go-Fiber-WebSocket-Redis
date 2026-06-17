@@ -80,7 +80,29 @@ var (
 			Help: "Number of active poker rooms",
 		},
 	)
+
+	// Error metrics
+	ErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "errors_total",
+			Help: "Total number of errors by component and type",
+		},
+		[]string{"component", "type"},
+	)
+
+	HTTPErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_errors_total",
+			Help: "Total number of HTTP responses with status >= 400",
+		},
+		[]string{"method", "path", "status"},
+	)
 )
+
+// RecordError increments the structured error counter for a component.
+func RecordError(component, errType string) {
+	ErrorsTotal.WithLabelValues(component, errType).Inc()
+}
 
 func init() {
 	prometheus.MustRegister(
@@ -93,6 +115,8 @@ func init() {
 		PlayersInQueue,
 		HandsDealt,
 		ActiveRooms,
+		ErrorsTotal,
+		HTTPErrorsTotal,
 	)
 }
 
@@ -104,24 +128,36 @@ func MetricsHandler() fiber.Handler {
 // MetricsMiddleware tracks HTTP request metrics
 func MetricsMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// Use the matched route pattern (e.g. /api/rooms/:id) rather than the
+		// raw path so high-cardinality IDs don't explode label cardinality.
+		route := c.Route().Path
+		if route == "" {
+			route = c.Path()
+		}
+
 		timer := prometheus.NewTimer(HTTPRequestDuration.WithLabelValues(
 			c.Method(),
-			c.Path(),
+			route,
 		))
 		defer timer.ObserveDuration()
-		
+
 		err := c.Next()
-		
+
 		status := c.Response().StatusCode()
 		// Convert the numeric HTTP status to its decimal string form (e.g. 200 -> "200").
 		// Using strconv.Itoa here is important: string(rune(status)) would instead
 		// produce the Unicode character for that code point, corrupting the metric label.
+		statusStr := strconv.Itoa(status)
 		HTTPRequestsTotal.WithLabelValues(
 			c.Method(),
-			c.Path(),
-			strconv.Itoa(status),
+			route,
+			statusStr,
 		).Inc()
-		
+
+		if status >= 400 {
+			HTTPErrorsTotal.WithLabelValues(c.Method(), route, statusStr).Inc()
+		}
+
 		return err
 	}
 }

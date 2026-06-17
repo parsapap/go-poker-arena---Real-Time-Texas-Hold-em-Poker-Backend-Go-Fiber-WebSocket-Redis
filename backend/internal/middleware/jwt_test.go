@@ -67,18 +67,21 @@ func TestGenerateTokenExpiration(t *testing.T) {
 
 func TestGenerateTokenIssuedAt(t *testing.T) {
 	os.Setenv("JWT_SECRET", "test-secret")
-	
-	before := time.Now()
+
+	// JWT NumericDate values are stored with whole-second precision, so the
+	// issued-at claim is the token's creation time truncated to the second.
+	// Compare against second-truncated bounds to avoid a sub-second flake.
+	before := time.Now().Truncate(time.Second)
 	token, _ := GenerateToken(1, "testuser")
 	after := time.Now()
-	
+
 	claims := &Claims{}
 	jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte("test-secret"), nil
 	})
-	
+
 	issuedAt := claims.IssuedAt.Time
-	if issuedAt.Before(before) || issuedAt.After(after) {
-		t.Error("IssuedAt timestamp not set correctly")
+	if issuedAt.Before(before) || issuedAt.After(after.Add(time.Second)) {
+		t.Errorf("IssuedAt timestamp not set correctly: issuedAt=%v before=%v after=%v", issuedAt, before, after)
 	}
 }

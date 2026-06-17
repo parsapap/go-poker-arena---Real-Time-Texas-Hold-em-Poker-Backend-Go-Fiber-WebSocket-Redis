@@ -28,8 +28,13 @@ func NewHub(redisClient *redis.Client) *Hub {
 }
 
 func (h *Hub) Run() {
-	ctx := context.Background()
-	
+	h.RunContext(context.Background())
+}
+
+// RunContext runs the hub event loop until ctx is cancelled, at which point it
+// tears down its Redis subscription and returns so the process can shut down
+// cleanly.
+func (h *Hub) RunContext(ctx context.Context) {
 	// Subscribe to room-specific channels using pattern subscription
 	pubsub := h.Redis.PSubscribe(ctx, "room:*")
 	defer pubsub.Close()
@@ -49,6 +54,10 @@ func (h *Hub) Run() {
 
 	for {
 		select {
+		case <-ctx.Done():
+			log.Printf("[HUB] Shutting down hub event loop")
+			return
+
 		case client := <-h.Register:
 			h.Clients[client] = true
 			if client.RoomID != "" {

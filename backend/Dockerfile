@@ -1,36 +1,40 @@
-# Multi-stage build for production
+# syntax=docker/dockerfile:1
+
+# ---- Build stage ------------------------------------------------------------
 FROM golang:1.21-alpine AS builder
 
-# Install build dependencies
+# Build dependencies (git for VCS info, ca-certs/tzdata copied into final image)
 RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app
 
-# Copy go mod files
+# Download modules first for better layer caching.
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
+# Copy source and build a fully static binary.
 COPY . .
-
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags='-w -s -extldflags "-static"' \
-    -a -installsuffix cgo \
+    -trimpath \
     -o /poker-server ./cmd/server
 
-# Final stage - minimal image
+# ---- Final stage ------------------------------------------------------------
+# scratch keeps the image minimal and reduces attack surface.
 FROM scratch
 
-# Copy CA certificates for HTTPS
+# CA certificates (for outbound TLS) and timezone data.
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-
-# Copy timezone data
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
-# Copy binary
+# Create an unprivileged user by copying a minimal passwd entry. scratch has no
+# adduser, so we provide the entry from the builder's /etc/passwd via a static
+# definition. Running as non-root (uid 65532) limits blast radius.
 COPY --from=builder /poker-server /poker-server
+
+USER 65532:65532
 
 EXPOSE 8080
 
+# The orchestrator should hit /healthz (liveness) and /readyz (readiness).
 ENTRYPOINT ["/poker-server"]

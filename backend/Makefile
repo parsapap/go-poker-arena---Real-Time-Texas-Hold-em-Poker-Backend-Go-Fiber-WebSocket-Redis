@@ -27,24 +27,24 @@ docker-down:
 	docker-compose down
 
 test:
-	go test ./internal/poker/... -v
+	go test ./... -v
 
 test-coverage:
-	go test ./internal/poker/... -cover -coverprofile=coverage.out
+	go test ./... -cover -coverprofile=coverage.out
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
+test-integration:
+	@echo "Requires a running server at localhost:8080 plus Postgres and Redis"
+	go test -tags=integration ./test/integration/... -v
+
 load-test:
-	@echo "Building load test..."
-	cd test && go mod init test 2>/dev/null || true
-	cd test && go get github.com/gorilla/websocket
-	cd test && go run ws_load_test.go
+	@echo "Running WebSocket load test (server must be running)..."
+	go run ./test/loadtest
 
 stress-test:
-	@echo "Building stress test with 1000 connections..."
-	cd test && go mod init test 2>/dev/null || true
-	cd test && go get github.com/gorilla/websocket
-	cd test && go run stress_test.go
+	@echo "Running stress test (server must be running)..."
+	go run ./test/stress
 
 clean:
 	rm -rf bin/

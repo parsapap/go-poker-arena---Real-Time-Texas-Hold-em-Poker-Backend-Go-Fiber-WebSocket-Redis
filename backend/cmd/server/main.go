@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -10,6 +11,7 @@ import (
 
 	"go-poker-arena/internal/anticheat"
 	"go-poker-arena/internal/auth"
+	"go-poker-arena/internal/config"
 	"go-poker-arena/internal/database"
 	"go-poker-arena/internal/history"
 	"go-poker-arena/internal/leaderboard"
@@ -31,7 +33,7 @@ import (
 )
 
 func main() {
-	// Load environment variables
+	// Load environment variables from .env if present (local dev convenience).
 	if err := godotenv.Load(); err != nil {
 		fmt.Println("No .env file found, using environment variables")
 	}
@@ -40,43 +42,51 @@ func main() {
 	logger.Init()
 	logger.Info().Msg("Starting Go Poker Arena...")
 
-	// Validate critical security configuration before doing anything else.
-	// Without a JWT secret the server would accept tokens signed with an
-	// empty key, so refuse to start.
-	if err := middleware.ValidateJWTSecret(); err != nil {
-		logger.Fatal().Err(err).Msg("Invalid security configuration")
+	// Load and validate all configuration up front. This fails fast on missing
+	// or weak critical values (e.g. JWT_SECRET) before any connections open.
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Invalid configuration")
 	}
 
-	// Connect to database
-	db, err := database.Connect()
+	// Connect to database with bounded connection pooling.
+	db, err := database.Connect(cfg.DB.DSN(), database.PoolConfig{
+		MaxOpenConns: cfg.DB.MaxOpenConns,
+		MaxIdleConns: cfg.DB.MaxIdleConns,
+		ConnMaxLife:  cfg.DB.ConnMaxLife,
+	})
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to connect to database")
 	}
-	logger.Info().Msg("Database connected successfully")
 
 	// Run migrations
-	autoMigrate := getEnv("AUTO_MIGRATE", "false") == "true"
-	if err := database.RunMigrations(db, autoMigrate); err != nil {
+	if err := database.RunMigrations(db, cfg.AutoMigrate); err != nil {
 		logger.Fatal().Err(err).Msg("Failed to run database migrations")
 	}
 	logger.Info().Msg("Database migrations completed")
 
-	// Connect to Redis
+	// Connect to Redis with a bounded connection pool.
 	redisClient := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", os.Getenv("REDIS_HOST"), os.Getenv("REDIS_PORT")),
-		Password: os.Getenv("REDIS_PASSWORD"),
-		DB:       0,
+		Addr:     cfg.Redis.Addr(),
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+		PoolSize: cfg.Redis.PoolSize,
 	})
 
-	ctx := context.Background()
-	if err := redisClient.Ping(ctx).Err(); err != nil {
+	pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelPing()
+	if err := redisClient.Ping(pingCtx).Err(); err != nil {
 		logger.Fatal().Err(err).Msg("Failed to connect to Redis")
 	}
 	logger.Info().Msg("Redis connected successfully")
 
+	// rootCtx is cancelled on shutdown to stop background goroutines cleanly.
+	rootCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Initialize services
 	hub := websocket.NewHub(redisClient)
-	go hub.Run()
+	go hub.RunContext(rootCtx)
 
 	roomManager := rooms.NewManager(db, redisClient)
 	leaderboardManager := leaderboard.NewLeaderboard(redisClient)
@@ -84,57 +94,80 @@ func main() {
 	rateLimiter := middleware.NewRateLimiter(redisClient)
 	authService := auth.NewService(db)
 	historyService := history.NewService(db)
-	adminMiddleware := middleware.NewAdminMiddleware(db)
+	adminMiddleware := middleware.NewAdminMiddleware(db, redisClient)
 	anticheatValidator := anticheat.NewValidator()
 
-	// Start auto-matchmaking worker
-	go matchmakingQueue.AutoMatchWorker(10*time.Second, roomManager)
+	// Start auto-matchmaking worker (stops when rootCtx is cancelled).
+	go matchmakingQueue.AutoMatchWorker(rootCtx, 10*time.Second, roomManager)
 	logger.Info().Msg("Auto-matchmaking worker started")
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
-		AppName:      "Go Poker Arena v1.0",
-		ServerHeader: "Go Poker Arena",
+		AppName:               "Go Poker Arena v1.0",
+		ServerHeader:          "Go Poker Arena",
+		BodyLimit:             cfg.BodyLimitBytes,
+		ReadTimeout:           cfg.RequestTimeout,
+		WriteTimeout:          cfg.RequestTimeout,
+		DisableStartupMessage: cfg.IsProduction(),
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {
 				code = e.Code
 			}
-			logger.Error().Err(err).Int("status", code).Str("path", c.Path()).Msg("Request error")
+			metrics.RecordError("http", "handler")
+			logger.Error().
+				Err(err).
+				Int("status", code).
+				Str("path", c.Path()).
+				Str("request_id", requestID(c)).
+				Msg("Request error")
 			return c.Status(code).JSON(fiber.Map{"error": err.Error()})
 		},
 	})
 
-	// Middleware
+	// Middleware (order matters: recover first, then tracing, then security).
 	app.Use(recover.New())
-	
-	// CORS configuration - allow WebSocket upgrade
-	env := getEnv("ENV", "development")
+	app.Use(middleware.RequestID())
+	app.Use(middleware.SecurityHeaders())
+
+	// CORS configuration.
 	corsConfig := cors.Config{
-		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
-		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,Upgrade,Connection,Sec-WebSocket-Key,Sec-WebSocket-Version,Sec-WebSocket-Extensions",
-		AllowCredentials: true,
+		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
+		AllowHeaders: "Origin,Content-Type,Accept,Authorization,Upgrade,Connection,Sec-WebSocket-Key,Sec-WebSocket-Version,Sec-WebSocket-Extensions",
 	}
-	
-	if env == "development" {
-		// Development: allow all origins for WebSocket testing
-		corsConfig.AllowOrigins = "*"
-		corsConfig.AllowCredentials = false // Can't use credentials with wildcard
+	if cfg.IsProduction() {
+		// Production: only explicitly allowed origins, with credentials.
+		corsConfig.AllowOrigins = cfg.AllowedOrigins
+		corsConfig.AllowCredentials = true
 	} else {
-		// Production: specific origins only
-		corsConfig.AllowOrigins = getEnv("ALLOWED_ORIGINS", "http://localhost:3000")
+		// Development: allow all origins for easy local/WebSocket testing.
+		corsConfig.AllowOrigins = "*"
+		corsConfig.AllowCredentials = false // cannot combine credentials with wildcard
 	}
-	
 	app.Use(cors.New(corsConfig))
 	app.Use(metrics.MetricsMiddleware())
 
-	// Health check
-	app.Get("/healthz", func(c *fiber.Ctx) error {
+	// Liveness/health checks. /health and /healthz are liveness probes;
+	// /readyz verifies dependencies (DB + Redis) are reachable.
+	healthHandler := func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"status":  "ok",
 			"service": "go-poker-arena",
 			"version": "1.0.0",
 		})
+	}
+	app.Get("/health", healthHandler)
+	app.Get("/healthz", healthHandler)
+	app.Get("/readyz", func(c *fiber.Ctx) error {
+		ctx, cancel := context.WithTimeout(c.Context(), 2*time.Second)
+		defer cancel()
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			return c.Status(503).JSON(fiber.Map{"status": "unavailable", "dependency": "redis"})
+		}
+		if sqlDB, err := db.DB(); err != nil || sqlDB.PingContext(ctx) != nil {
+			return c.Status(503).JSON(fiber.Map{"status": "unavailable", "dependency": "database"})
+		}
+		return c.JSON(fiber.Map{"status": "ready"})
 	})
 
 	app.Get("/metrics", metrics.MetricsHandler())
@@ -143,7 +176,7 @@ func main() {
 	setupAuthRoutes(app, authService)
 
 	// Protected API routes
-	api := app.Group("/api", rateLimiter.Limit(100, 1*time.Minute))
+	api := app.Group("/api", rateLimiter.Limit(cfg.APIRateLimit, 1*time.Minute))
 	api.Use(middleware.JWTAuth())
 	api.Use(adminMiddleware.CheckBanned())
 
@@ -151,13 +184,12 @@ func main() {
 	setupAdminRoutes(api, adminMiddleware, roomManager, authService)
 
 	// WebSocket endpoint
-	setupWebSocketRoute(app, hub, roomManager, rateLimiter)
+	setupWebSocketRoute(app, hub, roomManager, rateLimiter, cfg)
 
-	// Graceful shutdown
-	port := getEnv("PORT", "8080")
+	// Start the HTTP server.
 	go func() {
-		logger.Info().Str("port", port).Msg("Server starting")
-		if err := app.Listen(":" + port); err != nil {
+		logger.Info().Str("port", cfg.Port).Str("env", cfg.Env).Msg("Server starting")
+		if err := app.Listen(":" + cfg.Port); err != nil {
 			logger.Fatal().Err(err).Msg("Server failed to start")
 		}
 	}()
@@ -169,24 +201,31 @@ func main() {
 
 	logger.Info().Msg("Shutting down server...")
 
-	// Graceful shutdown with timeout
+	// Stop background goroutines (hub, matchmaking worker) first.
+	cancel()
+
+	// Graceful HTTP shutdown with timeout.
 	if err := app.ShutdownWithTimeout(30 * time.Second); err != nil {
 		logger.Error().Err(err).Msg("Server forced to shutdown")
 	}
 
-	// Close connections
-	redisClient.Close()
-	sqlDB, _ := db.DB()
-	sqlDB.Close()
+	// Close connections.
+	if err := redisClient.Close(); err != nil {
+		logger.Error().Err(err).Msg("Error closing Redis")
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.Close()
+	}
 
 	logger.Info().Msg("Server exited gracefully")
 }
 
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+// requestID extracts the trace ID set by the RequestID middleware.
+func requestID(c *fiber.Ctx) string {
+	if v, ok := c.Locals("request_id").(string); ok {
+		return v
 	}
-	return defaultValue
+	return ""
 }
 
 func setupAuthRoutes(app *fiber.App, authService *auth.Service) {
@@ -302,6 +341,11 @@ func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService
 
 		room, err := roomManager.CreateRoom(req.Name, req.MaxPlayers, req.SmallBlind, req.BigBlind)
 		if err != nil {
+			// Invalid configuration is a client error (400); anything else is
+			// an internal failure (500).
+			if errors.Is(err, rooms.ErrInvalidRoomConfig) {
+				return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+			}
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
@@ -534,6 +578,9 @@ func setupAdminRoutes(api fiber.Router, adminMiddleware *middleware.AdminMiddlew
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		// Invalidate cached ban status so the ban takes effect immediately.
+		adminMiddleware.InvalidateBanCache(req.UserID)
+
 		logger.Info().Uint("admin_id", adminID).Uint("user_id", req.UserID).Str("reason", req.Reason).Msg("User banned")
 		return c.JSON(fiber.Map{"status": "user banned"})
 	})
@@ -552,13 +599,16 @@ func setupAdminRoutes(api fiber.Router, adminMiddleware *middleware.AdminMiddlew
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		// Invalidate cached ban status so the unban takes effect immediately.
+		adminMiddleware.InvalidateBanCache(req.UserID)
+
 		logger.Info().Uint("user_id", req.UserID).Msg("User unbanned")
 		return c.JSON(fiber.Map{"status": "user unbanned"})
 	})
 }
 
 func setupWebSocketRoute(app *fiber.App, hub *websocket.Hub, roomManager *rooms.Manager, 
-	rateLimiter *middleware.RateLimiter) {
+	rateLimiter *middleware.RateLimiter, cfg *config.Config) {
 	
 	// WebSocket middleware - check upgrade and set headers
 	app.Use("/ws", func(c *fiber.Ctx) error {
@@ -578,7 +628,7 @@ func setupWebSocketRoute(app *fiber.App, hub *websocket.Hub, roomManager *rooms.
 	// which the handler below reads instead of trusting query parameters.
 	app.Use("/ws", middleware.WebSocketAuth())
 
-	app.Use("/ws", rateLimiter.WebSocketLimit(5))
+	app.Use("/ws", rateLimiter.WebSocketLimit(cfg.WSMaxConns))
 
 	app.Get("/ws", ws.New(func(c *ws.Conn) {
 		metrics.WebSocketConnections.Inc()

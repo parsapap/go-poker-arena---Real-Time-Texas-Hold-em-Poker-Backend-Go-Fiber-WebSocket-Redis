@@ -30,17 +30,28 @@ func (s *Service) SaveGame(game *poker.Game, winnerID uint, duration int) error 
 	for _, player := range game.Players {
 		if !player.Folded {
 			allCards := append(player.HoleCards, game.CommunityCards...)
-			hand := poker.EvaluateHand(allCards)
-			finalHands[player.ID] = hand.Rank.String()
+			// EvaluateHand returns nil when fewer than 5 cards are available
+			// (e.g. a game saved before the flop completes). Guard against it
+			// so saving history never panics.
+			if hand := poker.EvaluateHand(allCards); hand != nil {
+				finalHands[player.ID] = hand.Rank.String()
+			}
 		}
 	}
 	finalHandsJSON, _ := json.Marshal(finalHands)
+
+	// Sum all pots (main pot + any side pots) so the recorded total reflects
+	// the full amount contested, not just the main pot.
+	totalPot := int64(0)
+	for _, pot := range game.Pots {
+		totalPot += pot.Amount
+	}
 
 	history := &models.GameHistory{
 		GameID:     game.ID,
 		RoomID:     game.RoomID,
 		WinnerID:   winnerID,
-		Pot:        game.Pots[0].Amount,
+		Pot:        totalPot,
 		Players:    string(playersJSON),
 		Duration:   duration,
 		FinalHands: string(finalHandsJSON),

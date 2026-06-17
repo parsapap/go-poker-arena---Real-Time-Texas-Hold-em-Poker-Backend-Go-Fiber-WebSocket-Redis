@@ -1,4 +1,11 @@
-package test
+//go:build integration
+
+// Package integration contains end-to-end tests that require a running server
+// at localhost:8080 plus a live Postgres and Redis. They are excluded from the
+// default `go test ./...` run and are enabled with the `integration` build tag:
+//
+//	go test -tags=integration ./test/integration/...
+package integration
 
 import (
 	"bytes"

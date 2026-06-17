@@ -22,18 +22,23 @@ func Init() {
 
 	// Set global log level
 	level := os.Getenv("LOG_LEVEL")
+	var logLevel zerolog.Level
 	switch level {
 	case "debug":
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		logLevel = zerolog.DebugLevel
 	case "info":
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		logLevel = zerolog.InfoLevel
 	case "warn":
-		zerolog.SetGlobalLevel(zerolog.WarnLevel)
+		logLevel = zerolog.WarnLevel
 	case "error":
-		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+		logLevel = zerolog.ErrorLevel
 	default:
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		logLevel = zerolog.InfoLevel
 	}
+	zerolog.SetGlobalLevel(logLevel)
+	// Also pin the level on the logger instance so Log.GetLevel() reflects the
+	// configured level (not just the process-global level).
+	Log = Log.Level(logLevel)
 
 	Log.Info().Msg("Logger initialized")
 }

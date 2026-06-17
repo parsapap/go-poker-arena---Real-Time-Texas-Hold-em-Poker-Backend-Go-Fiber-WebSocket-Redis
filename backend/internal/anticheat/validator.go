@@ -155,21 +155,3 @@ func GetPartialGameState(game *poker.Game, forPlayerID uint) map[string]interfac
 		"current_position": game.CurrentPosition,
 	}
 }
-
-// DetectCollusion checks for suspicious patterns
-func (v *Validator) DetectCollusion(playerID1, playerID2 uint) bool {
-	// Check if players always fold when facing each other
-	// This is a simplified check - real implementation would be more sophisticated
-	v.mu.Lock()
-	actions1 := v.playerActions[playerID1]
-	actions2 := v.playerActions[playerID2]
-	v.mu.Unlock()
-	
-	// If both players have very similar action patterns, flag as suspicious
-	if len(actions1) > 10 && len(actions2) > 10 {
-		// More sophisticated pattern matching would go here
-		return false
-	}
-	
-	return false
-}

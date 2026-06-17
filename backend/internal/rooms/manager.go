@@ -3,7 +3,9 @@ package rooms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 	"go-poker-arena/internal/models"
@@ -26,6 +28,12 @@ type Manager struct {
 	// (setGame/deleteGame) take an exclusive lock.
 	mu sync.RWMutex
 }
+
+// roomCacheTTL bounds how long a cached room snapshot may be stale. Room
+// metadata is also invalidated explicitly on update (see cacheRoom /
+// invalidateRoomCache), but a TTL provides a safety net so cache entries can
+// never leak or remain stale indefinitely.
+const roomCacheTTL = 10 * time.Minute
 
 func NewManager(db *gorm.DB, redisClient *redis.Client) *Manager {
 	return &Manager{
@@ -58,12 +66,51 @@ func (m *Manager) deleteGame(roomID uint) {
 	delete(m.Games, roomID)
 }
 
+// roomCacheKey returns the Redis key holding the cached room snapshot.
+func roomCacheKey(roomID uint) string {
+	return fmt.Sprintf("room:%d", roomID)
+}
+
+// cacheRoom writes the room snapshot to Redis with a bounded TTL.
+func (m *Manager) cacheRoom(ctx context.Context, room *models.Room) {
+	roomData, err := json.Marshal(room)
+	if err != nil {
+		return
+	}
+	m.Redis.Set(ctx, roomCacheKey(room.ID), roomData, roomCacheTTL)
+}
+
+// invalidateRoomCache removes a stale room snapshot so the next read
+// repopulates it from the database. Call this whenever room state changes.
+func (m *Manager) invalidateRoomCache(ctx context.Context, roomID uint) {
+	m.Redis.Del(ctx, roomCacheKey(roomID))
+}
+
+// RoomConfig holds the parameters needed to create a room. It is validated by
+// ValidateRoomConfig before a room is persisted.
+type RoomConfig struct {
+	Name       string
+	MaxPlayers int
+	SmallBlind int64
+	BigBlind   int64
+}
+
 func (m *Manager) CreateRoom(name string, maxPlayers int, smallBlind, bigBlind int64) (*models.Room, error) {
-	room := &models.Room{
+	cfg := RoomConfig{
 		Name:       name,
 		MaxPlayers: maxPlayers,
 		SmallBlind: smallBlind,
 		BigBlind:   bigBlind,
+	}
+	if err := ValidateRoomConfig(cfg); err != nil {
+		return nil, err
+	}
+
+	room := &models.Room{
+		Name:       cfg.Name,
+		MaxPlayers: cfg.MaxPlayers,
+		SmallBlind: cfg.SmallBlind,
+		BigBlind:   cfg.BigBlind,
 		Status:     "waiting",
 	}
 
@@ -72,15 +119,43 @@ func (m *Manager) CreateRoom(name string, maxPlayers int, smallBlind, bigBlind i
 	}
 
 	ctx := context.Background()
-	roomData, _ := json.Marshal(room)
-	m.Redis.Set(ctx, fmt.Sprintf("room:%d", room.ID), roomData, 0)
+	m.cacheRoom(ctx, room)
 
 	return room, nil
 }
 
+// maxAllowedBlind caps blind sizes to a sane upper bound so a typo can't create
+// a table with absurd stakes.
+const maxAllowedBlind = int64(1_000_000)
+
+// ErrInvalidRoomConfig wraps all room-validation failures so callers (e.g. the
+// HTTP handler) can distinguish a client input error from an internal error
+// and respond with the appropriate status code.
+var ErrInvalidRoomConfig = errors.New("invalid room configuration")
+
+// ValidateRoomConfig enforces sane room parameters at creation time so that
+// invalid games (e.g. a single-seat table, non-positive blinds, or a big blind
+// not larger than the small blind) can never be persisted. All failures wrap
+// ErrInvalidRoomConfig.
+func ValidateRoomConfig(cfg RoomConfig) error {
+	switch {
+	case strings.TrimSpace(cfg.Name) == "":
+		return fmt.Errorf("%w: room name is required", ErrInvalidRoomConfig)
+	case cfg.MaxPlayers < 2 || cfg.MaxPlayers > 9:
+		return fmt.Errorf("%w: max_players must be between 2 and 9", ErrInvalidRoomConfig)
+	case cfg.SmallBlind <= 0:
+		return fmt.Errorf("%w: small_blind must be positive", ErrInvalidRoomConfig)
+	case cfg.BigBlind <= cfg.SmallBlind:
+		return fmt.Errorf("%w: big_blind must be greater than small_blind", ErrInvalidRoomConfig)
+	case cfg.BigBlind > maxAllowedBlind:
+		return fmt.Errorf("%w: big_blind must not exceed %d", ErrInvalidRoomConfig, maxAllowedBlind)
+	}
+	return nil
+}
+
 func (m *Manager) GetRoom(roomID uint) (*models.Room, error) {
 	ctx := context.Background()
-	key := fmt.Sprintf("room:%d", roomID)
+	key := roomCacheKey(roomID)
 
 	val, err := m.Redis.Get(ctx, key).Result()
 	if err == nil {
@@ -95,8 +170,7 @@ func (m *Manager) GetRoom(roomID uint) (*models.Room, error) {
 		return nil, err
 	}
 
-	roomData, _ := json.Marshal(room)
-	m.Redis.Set(ctx, key, roomData, 0)
+	m.cacheRoom(ctx, &room)
 
 	return &room, nil
 }
@@ -151,13 +225,22 @@ func (m *Manager) JoinRoom(roomID, userID uint) error {
 		}
 	}
 
+	// Player membership changed; drop the cached snapshot so any derived
+	// reads repopulate from the source of truth.
+	m.invalidateRoomCache(ctx, roomID)
+
 	return nil
 }
 
 func (m *Manager) LeaveRoom(roomID, userID uint) error {
 	ctx := context.Background()
 	key := fmt.Sprintf("room:%d:players", roomID)
-	return m.Redis.SRem(ctx, key, userID).Err()
+	if err := m.Redis.SRem(ctx, key, userID).Err(); err != nil {
+		return err
+	}
+	// Player membership changed; invalidate the cached room snapshot.
+	m.invalidateRoomCache(ctx, roomID)
+	return nil
 }
 
 func (m *Manager) GetRoomPlayers(roomID uint) ([]uint, error) {
@@ -253,9 +336,13 @@ func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
 
 	m.setGame(roomID, game)
 
+	ctx := context.Background()
+
 	// Update room status
 	room.Status = "playing"
 	m.DB.Model(room).Update("status", "playing")
+	// Invalidate the cached snapshot so the next read reflects "playing".
+	m.invalidateRoomCache(ctx, roomID)
 
 	// Save game to database
 	dbGame := &models.Game{
@@ -269,8 +356,6 @@ func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
 	}
 	game.ID = dbGame.ID
 
-	ctx := context.Background()
-	
 	roomIDStr := fmt.Sprintf("%d", roomID)
 	
 	// 1. Send hole cards to each player privately
@@ -469,8 +554,12 @@ func (m *Manager) EndRound(roomID uint) error {
 		"stage":  string(poker.PhaseFinished),
 	})
 
-	// Publish game end event
+	// Mark the room as finished and invalidate its cached snapshot.
 	ctx := context.Background()
+	m.DB.Model(&models.Room{}).Where("id = ?", roomID).Update("status", "finished")
+	m.invalidateRoomCache(ctx, roomID)
+
+	// Publish game end event
 	endData, _ := json.Marshal(map[string]interface{}{
 		"type":    "game_end",
 		"room_id": fmt.Sprintf("%d", roomID),

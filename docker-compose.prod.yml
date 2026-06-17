@@ -45,11 +45,23 @@ services:
     container_name: poker-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-poker}:${POSTGRES_PASSWORD:-poker123}@postgres:5432/${POSTGRES_DB:-poker_arena}?sslmode=disable
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       PORT: 8080
-      GIN_MODE: release
+      # Discrete connection settings (the backend reads these, not *_URL).
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-poker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-poker_arena}
+      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:-disable}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # JWT_SECRET MUST be a strong value; compose will error if unset.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS is required in production}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-false}
     ports:
       - "8080:8080"
     depends_on:
@@ -57,11 +69,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    # NOTE: the runtime image is built FROM scratch and has no shell or curl,
+    # so a command-based container healthcheck cannot run inside it. Use an
+    # external HTTP probe (e.g. Kubernetes liveness/readiness probes) against
+    # /healthz (liveness) and /readyz (readiness) instead.
     networks:
       - poker-network
 

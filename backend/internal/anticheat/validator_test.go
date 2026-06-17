@@ -270,27 +270,6 @@ func TestGetPartialGameStateShowdown(t *testing.T) {
 	}
 }
 
-func TestDetectCollusion(t *testing.T) {
-	v := NewValidator()
-	
-	// Test with no actions
-	result := v.DetectCollusion(1, 2)
-	if result {
-		t.Error("Should not detect collusion with no actions")
-	}
-	
-	// Test with few actions
-	for i := 0; i < 5; i++ {
-		v.playerActions[1] = append(v.playerActions[1], time.Now())
-		v.playerActions[2] = append(v.playerActions[2], time.Now())
-	}
-	
-	result = v.DetectCollusion(1, 2)
-	if result {
-		t.Error("Should not detect collusion with few actions")
-	}
-}
-
 // Helper function to create test game
 func createTestGame() *poker.Game {
 	players := []*poker.Player{

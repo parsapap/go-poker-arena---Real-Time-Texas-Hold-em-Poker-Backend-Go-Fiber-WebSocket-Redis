@@ -16,19 +16,3 @@ type Game struct {
 	Pot       int64          `gorm:"default:0" json:"pot"`
 	Stage     string         `gorm:"default:'preflop'" json:"stage"` // preflop, flop, turn, river, showdown
 }
-
-type Player struct {
-	UserID    uint   `json:"user_id"`
-	Username  string `json:"username"`
-	Chips     int64  `json:"chips"`
-	Bet       int64  `json:"bet"`
-	Position  int    `json:"position"`
-	Cards     []Card `json:"cards,omitempty"`
-	Folded    bool   `json:"folded"`
-	AllIn     bool   `json:"all_in"`
-}
-
-type Card struct {
-	Suit  string `json:"suit"`  // hearts, diamonds, clubs, spades
-	Rank  string `json:"rank"`  // 2-10, J, Q, K, A
-}

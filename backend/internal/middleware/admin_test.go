@@ -23,7 +23,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 
 func TestNewAdminMiddleware(t *testing.T) {
 	db := setupTestDB(t)
-	am := NewAdminMiddleware(db)
+	am := NewAdminMiddleware(db, nil)
 
 	if am == nil {
 		t.Error("NewAdminMiddleware should not return nil")
@@ -36,11 +36,12 @@ func TestNewAdminMiddleware(t *testing.T) {
 
 func TestRequireAdminMiddleware(t *testing.T) {
 	db := setupTestDB(t)
-	am := NewAdminMiddleware(db)
+	am := NewAdminMiddleware(db, nil)
 
 	// Create admin user
 	admin := &models.User{
 		Username: "admin",
+		Email:    "admin@example.com",
 		IsAdmin:  true,
 	}
 	db.Create(admin)
@@ -48,6 +49,7 @@ func TestRequireAdminMiddleware(t *testing.T) {
 	// Create regular user
 	user := &models.User{
 		Username: "user",
+		Email:    "user@example.com",
 		IsAdmin:  false,
 	}
 	db.Create(user)
@@ -61,11 +63,12 @@ func TestRequireAdminMiddleware(t *testing.T) {
 
 func TestCheckBannedMiddleware(t *testing.T) {
 	db := setupTestDB(t)
-	am := NewAdminMiddleware(db)
+	am := NewAdminMiddleware(db, nil)
 
 	// Create banned user
 	banned := &models.User{
 		Username: "banned",
+		Email:    "banned@example.com",
 		IsBanned: true,
 	}
 	db.Create(banned)
@@ -73,6 +76,7 @@ func TestCheckBannedMiddleware(t *testing.T) {
 	// Create regular user
 	user := &models.User{
 		Username: "user",
+		Email:    "user@example.com",
 		IsBanned: false,
 	}
 	db.Create(user)

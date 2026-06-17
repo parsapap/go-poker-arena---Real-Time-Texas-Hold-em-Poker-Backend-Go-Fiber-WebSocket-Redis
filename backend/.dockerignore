@@ -1,5 +1,4 @@
-.git
-.github
+# Build context is ./backend, so paths are relative to it.
 .env
 *.env
 !.env.example
@@ -9,8 +8,7 @@ bin/
 coverage.out
 coverage.html
 README.md
-docs/
-frontend/
+Makefile
 
 # Load/stress/integration helpers are not needed in the runtime image.
-backend/test/
+test/

@@ -59,9 +59,15 @@ jobs:
       - name: Run tests
         working-directory: ./backend
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/poker_test?sslmode=disable
-          REDIS_URL: redis://localhost:6379
-          JWT_SECRET: test-secret-key
+          ENV: test
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: poker_test
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          JWT_SECRET: ci-test-secret-key-1234567890
         run: go test -v -race -coverprofile=coverage.out ./...
 
       - name: Upload coverage

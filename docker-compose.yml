@@ -65,11 +65,10 @@ services:
     networks:
       - poker-network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    # The runtime image is built FROM scratch (no shell/wget), so the
+    # orchestrator should probe /healthz over HTTP externally rather than
+    # running an in-container healthcheck. depends_on below still waits for
+    # Postgres/Redis to be healthy.
 
   frontend:
     build:
@@ -89,8 +88,7 @@ services:
       HOSTNAME: "0.0.0.0"
       NODE_ENV: production
     depends_on:
-      backend:
-        condition: service_healthy
+      - backend
     networks:
       - poker-network
     restart: unless-stopped

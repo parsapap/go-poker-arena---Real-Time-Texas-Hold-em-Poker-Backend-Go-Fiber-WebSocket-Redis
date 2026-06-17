@@ -2,39 +2,49 @@ package database
 
 import (
 	"fmt"
-	"log"
-	"os"
-	"go-poker-arena/internal/models"
+	"time"
+
+	"go-poker-arena/internal/logger"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
-func Connect() (*gorm.DB, error) {
-	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
-		os.Getenv("POSTGRES_HOST"),
-		os.Getenv("POSTGRES_USER"),
-		os.Getenv("POSTGRES_PASSWORD"),
-		os.Getenv("POSTGRES_DB"),
-		os.Getenv("POSTGRES_PORT"),
-	)
-
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	if err != nil {
-		return nil, err
-	}
-
-	log.Println("Database connected successfully")
-	return db, nil
+// PoolConfig controls the underlying database/sql connection pool.
+type PoolConfig struct {
+	MaxOpenConns int
+	MaxIdleConns int
+	ConnMaxLife  time.Duration
 }
 
-func Migrate(db *gorm.DB) error {
-	return db.AutoMigrate(
-		&models.User{},
-		&models.Room{},
-		&models.Game{},
-		&models.GameHistory{},
-		&models.PlayerAction{},
-		&models.BanRecord{},
-	)
+// Connect opens a PostgreSQL connection using the provided DSN and applies the
+// given connection-pool settings. Pooling is essential under load: without
+// bounds the server can exhaust database connections or hold idle ones open.
+func Connect(dsn string, pool PoolConfig) (*gorm.DB, error) {
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		// Quiet GORM's own logger; we use structured zerolog elsewhere.
+		Logger: gormlogger.Default.LogMode(gormlogger.Warn),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("access underlying sql.DB: %w", err)
+	}
+
+	sqlDB.SetMaxOpenConns(pool.MaxOpenConns)
+	sqlDB.SetMaxIdleConns(pool.MaxIdleConns)
+	sqlDB.SetConnMaxLifetime(pool.ConnMaxLife)
+
+	if err := sqlDB.Ping(); err != nil {
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+
+	logger.Info().
+		Int("max_open_conns", pool.MaxOpenConns).
+		Int("max_idle_conns", pool.MaxIdleConns).
+		Msg("Database connected successfully")
+	return db, nil
 }
