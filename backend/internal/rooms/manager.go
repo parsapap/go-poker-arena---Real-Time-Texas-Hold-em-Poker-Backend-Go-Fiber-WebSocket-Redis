@@ -378,14 +378,14 @@ func (m *Manager) ProcessAction(roomID, playerID uint, action string, amount int
 	}
 	
 	if activePlayers == 1 && lastActivePlayer != nil {
-		// One player wins by fold - award pot
-		totalPot := int64(0)
-		for _, pot := range game.Pots {
-			totalPot += pot.Amount
+		// One player wins by fold. Delegate to the engine so the pot is
+		// awarded and game.Winners is populated authoritatively (instead of
+		// crediting chips here and recomputing winners later).
+		if err := game.AwardToLastPlayer(); err != nil {
+			return err
 		}
-		lastActivePlayer.Chips += totalPot
-		
-		fmt.Printf("[ROOM %d] %s wins by fold! Pot: %d\n", roomID, lastActivePlayer.Username, totalPot)
+
+		fmt.Printf("[ROOM %d] %s wins by fold!\n", roomID, lastActivePlayer.Username)
 		
 		// End the round
 		m.EndRound(roomID)
@@ -541,51 +541,28 @@ func (m *Manager) serializePlayersForShowdown(game *poker.Game) []map[string]int
 	return players
 }
 
+// getWinners returns the authoritative winner information recorded by the
+// poker engine (Showdown / AwardToLastPlayer). It no longer recomputes winners
+// or pot splits independently — doing so previously risked diverging from the
+// chip amounts actually credited to players (e.g. with side pots or split
+// pots). The engine is the single source of truth.
 func (m *Manager) getWinners(game *poker.Game) []map[string]interface{} {
-	winners := make([]map[string]interface{}, 0)
-	
-	// Find the best hand among non-folded players
-	var bestHand *poker.Hand
-	var bestPlayers []*poker.Player
-	
-	for _, player := range game.Players {
-		if !player.Folded {
-			allCards := append(player.HoleCards, game.CommunityCards...)
-			hand := poker.EvaluateHand(allCards)
-			
-			if bestHand == nil {
-				bestHand = hand
-				bestPlayers = []*poker.Player{player}
-			} else {
-				cmp := poker.CompareHands(hand, bestHand)
-				if cmp > 0 {
-					bestHand = hand
-					bestPlayers = []*poker.Player{player}
-				} else if cmp == 0 {
-					bestPlayers = append(bestPlayers, player)
-				}
-			}
+	winners := make([]map[string]interface{}, 0, len(game.Winners))
+
+	for _, w := range game.Winners {
+		entry := map[string]interface{}{
+			"player_id": w.PlayerID,
+			"username":  w.Username,
+			"amount":    w.Amount,
 		}
+		// HandRank/BestFive are empty for a win by fold; include them only
+		// when a showdown actually evaluated a hand.
+		if w.HandRank != "" {
+			entry["hand"] = w.HandRank
+			entry["cards"] = w.BestFive
+		}
+		winners = append(winners, entry)
 	}
-	
-	// Calculate winnings per winner
-	totalPot := int64(0)
-	for _, pot := range game.Pots {
-		totalPot += pot.Amount
-	}
-	winAmount := totalPot / int64(len(bestPlayers))
-	
-	for _, player := range bestPlayers {
-		allCards := append(player.HoleCards, game.CommunityCards...)
-		hand := poker.EvaluateHand(allCards)
-		winners = append(winners, map[string]interface{}{
-			"player_id": player.ID,
-			"username":  player.Username,
-			"hand":      hand.Rank.String(),
-			"cards":     hand.BestFive,
-			"amount":    winAmount,
-		})
-	}
-	
+
 	return winners
 }
