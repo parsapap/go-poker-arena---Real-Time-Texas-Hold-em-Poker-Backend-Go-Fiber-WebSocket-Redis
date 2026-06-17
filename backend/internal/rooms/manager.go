@@ -186,28 +186,37 @@ func (m *Manager) ListRooms() ([]models.Room, error) {
 func (m *Manager) JoinRoom(roomID, userID uint) error {
 	ctx := context.Background()
 	key := fmt.Sprintf("room:%d:players", roomID)
-	
-	count, err := m.Redis.SCard(ctx, key).Result()
-	if err != nil {
-		return err
-	}
 
 	room, err := m.GetRoom(roomID)
 	if err != nil {
 		return err
 	}
 
-	if int(count) >= room.MaxPlayers {
-		return fmt.Errorf("room is full")
-	}
-
-	if err := m.Redis.SAdd(ctx, key, userID).Err(); err != nil {
+	// Add the player first, then read the authoritative member count. Reading
+	// the count BEFORE adding caused a time-of-check/time-of-use race: two
+	// near-simultaneous joins both saw 0 and neither reached the 2-player
+	// start threshold. SADD returns whether the member was newly added.
+	added, err := m.Redis.SAdd(ctx, key, userID).Result()
+	if err != nil {
 		return err
 	}
 
+	newCount, err := m.Redis.SCard(ctx, key).Result()
+	if err != nil {
+		return err
+	}
+
+	// Enforce capacity using the post-add count. If this player pushed the
+	// room over its max, roll back the add and reject.
+	if int(newCount) > room.MaxPlayers {
+		m.Redis.SRem(ctx, key, userID)
+		return fmt.Errorf("room is full")
+	}
+
 	// Check if we have enough players to start the game
-	newCount := count + 1
-	fmt.Printf("[ROOM %d] Player %d joined → %d players total\n", roomID, userID, newCount)
+	if added == 1 {
+		fmt.Printf("[ROOM %d] Player %d joined → %d players total\n", roomID, userID, newCount)
+	}
 	
 	if newCount >= 2 && room.Status == "waiting" {
 		// Check if game is not already starting

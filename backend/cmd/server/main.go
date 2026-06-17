@@ -657,7 +657,13 @@ func setupWebSocketRoute(app *fiber.App, hub *websocket.Hub, roomManager *rooms.
 		go client.WritePump()
 		client.ReadPump()
 
-		rateLimiter.DecrementWSConnection(fmt.Sprintf("%d", uid))
+		// Mirror the key format produced by wsLimitID at connect time so the
+		// per-user connection counter is decremented correctly on disconnect.
+		if uid != 0 {
+			rateLimiter.DecrementWSConnection(fmt.Sprintf("u:%d", uid))
+		} else {
+			rateLimiter.DecrementWSConnection("ip:" + c.RemoteAddr().String())
+		}
 		logger.Info().Uint("user_id", uid).Msg("WebSocket disconnected")
 	}))
 }
