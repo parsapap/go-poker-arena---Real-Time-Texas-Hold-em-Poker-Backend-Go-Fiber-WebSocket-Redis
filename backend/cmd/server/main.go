@@ -40,6 +40,13 @@ func main() {
 	logger.Init()
 	logger.Info().Msg("Starting Go Poker Arena...")
 
+	// Validate critical security configuration before doing anything else.
+	// Without a JWT secret the server would accept tokens signed with an
+	// empty key, so refuse to start.
+	if err := middleware.ValidateJWTSecret(); err != nil {
+		logger.Fatal().Err(err).Msg("Invalid security configuration")
+	}
+
 	// Connect to database
 	db, err := database.Connect()
 	if err != nil {
@@ -360,11 +367,15 @@ func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid room ID"})
 		}
 
+		// The acting player's identity always comes from the verified JWT,
+		// never from the request body. This prevents a client from
+		// submitting actions on behalf of another player.
+		playerID := c.Locals("user_id").(uint)
+
 		var req struct {
-			PlayerID uint   `json:"player_id"`
-			Action   string `json:"action"`
-			Amount   int64  `json:"amount"`
-			Latency  int    `json:"latency"`
+			Action  string `json:"action"`
+			Amount  int64  `json:"amount"`
+			Latency int    `json:"latency"`
 		}
 
 		if err := c.BodyParser(&req); err != nil {
@@ -372,7 +383,7 @@ func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService
 		}
 
 		if err := anticheatValidator.CheckLatency(req.Latency); err != nil {
-			logger.Warn().Uint("player_id", req.PlayerID).Int("latency", req.Latency).Msg("Latency check failed")
+			logger.Warn().Uint("player_id", playerID).Int("latency", req.Latency).Msg("Latency check failed")
 			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 		}
 
@@ -386,19 +397,19 @@ func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService
 			return c.Status(500).JSON(fiber.Map{"error": "Invalid game type"})
 		}
 
-		if err := anticheatValidator.ValidateAction(req.PlayerID, poker.Action(req.Action), req.Amount, pokerGame); err != nil {
-			logger.Warn().Uint("player_id", req.PlayerID).Str("action", req.Action).Msg("Action validation failed")
+		if err := anticheatValidator.ValidateAction(playerID, poker.Action(req.Action), req.Amount, pokerGame); err != nil {
+			logger.Warn().Uint("player_id", playerID).Str("action", req.Action).Msg("Action validation failed")
 			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		historyService.SaveAction(pokerGame.ID, req.PlayerID, req.Action, req.Amount, string(pokerGame.Phase), req.Latency)
+		historyService.SaveAction(pokerGame.ID, playerID, req.Action, req.Amount, string(pokerGame.Phase), req.Latency)
 
-		err = roomManager.ProcessAction(uint(roomID), req.PlayerID, req.Action, req.Amount)
+		err = roomManager.ProcessAction(uint(roomID), playerID, req.Action, req.Amount)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		partialState := anticheat.GetPartialGameState(pokerGame, req.PlayerID)
+		partialState := anticheat.GetPartialGameState(pokerGame, playerID)
 		return c.JSON(partialState)
 	})
 
@@ -561,19 +572,24 @@ func setupWebSocketRoute(app *fiber.App, hub *websocket.Hub, roomManager *rooms.
 		}
 		return fiber.ErrUpgradeRequired
 	})
-	
+
+	// Authenticate the upgrade request via JWT before establishing the
+	// connection. This stores the verified user_id/username in c.Locals,
+	// which the handler below reads instead of trusting query parameters.
+	app.Use("/ws", middleware.WebSocketAuth())
+
 	app.Use("/ws", rateLimiter.WebSocketLimit(5))
 
 	app.Get("/ws", ws.New(func(c *ws.Conn) {
 		metrics.WebSocketConnections.Inc()
 		defer metrics.WebSocketConnections.Dec()
 
-		userID := c.Query("user_id", "0")
-		username := c.Query("username", "guest")
+		// Identity comes from the verified JWT (set by WebSocketAuth),
+		// NOT from client-supplied query parameters. This prevents a
+		// client from impersonating another user.
+		uid, _ := c.Locals("user_id").(uint)
+		username, _ := c.Locals("username").(string)
 		roomID := c.Query("room_id", "")
-
-		var uid uint
-		fmt.Sscanf(userID, "%d", &uid)
 
 		client := &websocket.Client{
 			Hub:         hub,
@@ -591,7 +607,7 @@ func setupWebSocketRoute(app *fiber.App, hub *websocket.Hub, roomManager *rooms.
 		go client.WritePump()
 		client.ReadPump()
 
-		rateLimiter.DecrementWSConnection(userID)
+		rateLimiter.DecrementWSConnection(fmt.Sprintf("%d", uid))
 		logger.Info().Uint("user_id", uid).Msg("WebSocket disconnected")
 	}))
 }
