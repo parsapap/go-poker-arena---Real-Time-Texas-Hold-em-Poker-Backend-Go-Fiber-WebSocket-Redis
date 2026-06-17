@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"strconv"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/prometheus/client_golang/prometheus"
@@ -111,10 +113,13 @@ func MetricsMiddleware() fiber.Handler {
 		err := c.Next()
 		
 		status := c.Response().StatusCode()
+		// Convert the numeric HTTP status to its decimal string form (e.g. 200 -> "200").
+		// Using strconv.Itoa here is important: string(rune(status)) would instead
+		// produce the Unicode character for that code point, corrupting the metric label.
 		HTTPRequestsTotal.WithLabelValues(
 			c.Method(),
 			c.Path(),
-			string(rune(status)),
+			strconv.Itoa(status),
 		).Inc()
 		
 		return err

@@ -15,8 +15,16 @@ import (
 type Manager struct {
 	DB    *gorm.DB
 	Redis *redis.Client
+	// Games holds the in-memory live game state keyed by room ID.
+	// It is accessed concurrently from HTTP handlers and background
+	// goroutines (e.g. StartGameCountdown), so every access MUST go
+	// through the setGame/getGame/deleteGame helpers, which guard it
+	// with mu.
 	Games map[uint]*poker.Game
-	mu    sync.RWMutex
+	// mu guards the Games map. We use an RWMutex so that frequent
+	// reads (getGame) can proceed in parallel, while writes
+	// (setGame/deleteGame) take an exclusive lock.
+	mu sync.RWMutex
 }
 
 func NewManager(db *gorm.DB, redisClient *redis.Client) *Manager {
@@ -27,26 +35,27 @@ func NewManager(db *gorm.DB, redisClient *redis.Client) *Manager {
 	}
 }
 
-// setGame stores a game under the manager lock.
+// setGame stores a game in the Games map under an exclusive write lock.
 func (m *Manager) setGame(roomID uint, game *poker.Game) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Games[roomID] = game
-	m.mu.Unlock()
 }
 
-// getGame retrieves a game under a read lock.
+// getGame retrieves a game from the Games map under a shared read lock,
+// allowing concurrent reads without blocking each other.
 func (m *Manager) getGame(roomID uint) (*poker.Game, bool) {
 	m.mu.RLock()
+	defer m.mu.RUnlock()
 	game, ok := m.Games[roomID]
-	m.mu.RUnlock()
 	return game, ok
 }
 
-// deleteGame removes a game under the manager lock.
+// deleteGame removes a game from the Games map under an exclusive write lock.
 func (m *Manager) deleteGame(roomID uint) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.Games, roomID)
-	m.mu.Unlock()
 }
 
 func (m *Manager) CreateRoom(name string, maxPlayers int, smallBlind, bigBlind int64) (*models.Room, error) {

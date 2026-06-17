@@ -14,6 +14,10 @@ const (
 )
 
 type Validator struct {
+	// mu guards playerActions and lastAction, which are read and written
+	// concurrently for every player action arriving from different
+	// goroutines. A plain Mutex is sufficient here because all accesses
+	// mutate the maps, so there is no read-only fast path to optimize for.
 	mu            sync.Mutex
 	playerActions map[uint][]time.Time
 	lastAction    map[uint]time.Time
@@ -30,6 +34,10 @@ func NewValidator() *Validator {
 func (v *Validator) ValidateAction(playerID uint, action poker.Action, amount int64, game *poker.Game) error {
 	now := time.Now()
 
+	// Hold the lock only while touching the shared rate-tracking maps.
+	// We deliberately release it before doing the (lock-free) game-state
+	// checks below so the mutex isn't held longer than necessary. Note
+	// every early return inside this block must unlock first.
 	v.mu.Lock()
 	// Check action interval
 	if last, ok := v.lastAction[playerID]; ok {
