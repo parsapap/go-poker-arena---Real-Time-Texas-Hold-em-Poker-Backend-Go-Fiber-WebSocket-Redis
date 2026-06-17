@@ -2,6 +2,7 @@ package history
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 	"go-poker-arena/internal/models"
 	"go-poker-arena/internal/poker"
@@ -72,7 +73,7 @@ func (s *Service) GetUserHistory(userID uint, limit int) ([]models.GameHistory, 
 		WHERE gh.players::jsonb @> ?
 		ORDER BY gh.created_at DESC
 		LIMIT ?
-	`, json.RawMessage(`[{"id":`+string(rune(userID))+`}]`), limit).Scan(&history).Error
+	`, json.RawMessage(fmt.Sprintf(`[{"id":%d}]`, userID)), limit).Scan(&history).Error
 	
 	if err != nil {
 		return nil, err
@@ -105,7 +106,7 @@ func (s *Service) GetPlayerStats(userID uint) (map[string]interface{}, error) {
 
 	var totalGames int64
 	s.DB.Model(&models.GameHistory{}).
-		Where("players::jsonb @> ?", json.RawMessage(`[{"id":`+string(rune(userID))+`}]`)).
+		Where("players::jsonb @> ?", json.RawMessage(fmt.Sprintf(`[{"id":%d}]`, userID))).
 		Count(&totalGames)
 
 	var totalActions int64

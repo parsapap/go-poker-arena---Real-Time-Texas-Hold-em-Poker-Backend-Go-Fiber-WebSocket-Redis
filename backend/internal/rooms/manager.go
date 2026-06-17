@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 	"go-poker-arena/internal/models"
 	"go-poker-arena/internal/poker"
@@ -15,6 +16,7 @@ type Manager struct {
 	DB    *gorm.DB
 	Redis *redis.Client
 	Games map[uint]*poker.Game
+	mu    sync.RWMutex
 }
 
 func NewManager(db *gorm.DB, redisClient *redis.Client) *Manager {
@@ -23,6 +25,28 @@ func NewManager(db *gorm.DB, redisClient *redis.Client) *Manager {
 		Redis: redisClient,
 		Games: make(map[uint]*poker.Game),
 	}
+}
+
+// setGame stores a game under the manager lock.
+func (m *Manager) setGame(roomID uint, game *poker.Game) {
+	m.mu.Lock()
+	m.Games[roomID] = game
+	m.mu.Unlock()
+}
+
+// getGame retrieves a game under a read lock.
+func (m *Manager) getGame(roomID uint) (*poker.Game, bool) {
+	m.mu.RLock()
+	game, ok := m.Games[roomID]
+	m.mu.RUnlock()
+	return game, ok
+}
+
+// deleteGame removes a game under the manager lock.
+func (m *Manager) deleteGame(roomID uint) {
+	m.mu.Lock()
+	delete(m.Games, roomID)
+	m.mu.Unlock()
 }
 
 func (m *Manager) CreateRoom(name string, maxPlayers int, smallBlind, bigBlind int64) (*models.Room, error) {
@@ -218,7 +242,7 @@ func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
 		return nil, err
 	}
 
-	m.Games[roomID] = game
+	m.setGame(roomID, game)
 
 	// Update room status
 	room.Status = "playing"
@@ -298,7 +322,7 @@ func (m *Manager) StartGame(roomID uint) (*models.Room, error) {
 }
 
 func (m *Manager) GetGame(roomID uint) (interface{}, error) {
-	game, ok := m.Games[roomID]
+	game, ok := m.getGame(roomID)
 	if !ok {
 		return nil, fmt.Errorf("game not found for room %d", roomID)
 	}
@@ -445,7 +469,7 @@ func (m *Manager) EndRound(roomID uint) error {
 	})
 	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), endData)
 
-	delete(m.Games, roomID)
+	m.deleteGame(roomID)
 	return nil
 }
 

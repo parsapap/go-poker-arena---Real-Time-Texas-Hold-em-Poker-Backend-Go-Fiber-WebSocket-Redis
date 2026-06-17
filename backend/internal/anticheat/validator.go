@@ -2,6 +2,7 @@ package anticheat
 
 import (
 	"errors"
+	"sync"
 	"time"
 	"go-poker-arena/internal/poker"
 )
@@ -13,6 +14,7 @@ const (
 )
 
 type Validator struct {
+	mu            sync.Mutex
 	playerActions map[uint][]time.Time
 	lastAction    map[uint]time.Time
 }
@@ -28,9 +30,11 @@ func NewValidator() *Validator {
 func (v *Validator) ValidateAction(playerID uint, action poker.Action, amount int64, game *poker.Game) error {
 	now := time.Now()
 
+	v.mu.Lock()
 	// Check action interval
 	if last, ok := v.lastAction[playerID]; ok {
 		if now.Sub(last) < MinActionInterval*time.Millisecond {
+			v.mu.Unlock()
 			return errors.New("actions too fast - possible bot")
 		}
 	}
@@ -38,7 +42,7 @@ func (v *Validator) ValidateAction(playerID uint, action poker.Action, amount in
 
 	// Track actions per minute
 	v.playerActions[playerID] = append(v.playerActions[playerID], now)
-	
+
 	// Clean old actions (older than 1 minute)
 	cutoff := now.Add(-1 * time.Minute)
 	filtered := make([]time.Time, 0)
@@ -50,7 +54,10 @@ func (v *Validator) ValidateAction(playerID uint, action poker.Action, amount in
 	v.playerActions[playerID] = filtered
 
 	// Check action rate
-	if len(v.playerActions[playerID]) > MaxActionsPerMin {
+	actionCount := len(v.playerActions[playerID])
+	v.mu.Unlock()
+
+	if actionCount > MaxActionsPerMin {
 		return errors.New("too many actions - possible bot")
 	}
 
@@ -145,8 +152,10 @@ func GetPartialGameState(game *poker.Game, forPlayerID uint) map[string]interfac
 func (v *Validator) DetectCollusion(playerID1, playerID2 uint) bool {
 	// Check if players always fold when facing each other
 	// This is a simplified check - real implementation would be more sophisticated
+	v.mu.Lock()
 	actions1 := v.playerActions[playerID1]
 	actions2 := v.playerActions[playerID2]
+	v.mu.Unlock()
 	
 	// If both players have very similar action patterns, flag as suspicious
 	if len(actions1) > 10 && len(actions2) > 10 {
