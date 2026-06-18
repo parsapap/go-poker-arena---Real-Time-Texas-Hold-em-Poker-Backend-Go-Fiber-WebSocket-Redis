@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Poker Arena — Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen">
+<div id="app" class="h-full"></div>
+
+<script>
+const API = (location.origin).replace(/\/$/, "");
+let token = localStorage.getItem("admin_token") || "";
+
+// ---- API helper -----------------------------------------------------------
+async function api(path, opts = {}) {
+  const res = await fetch(API + "/api/admin" + path, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + token,
+      ...(opts.headers || {}),
+    },
+  });
+  if (res.status === 401 || res.status === 403) {
+    logout();
+    throw new Error("unauthorized");
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
+function logout() {
+  token = "";
+  localStorage.removeItem("admin_token");
+  renderLogin();
+}
+
+// ---- Login ----------------------------------------------------------------
+function renderLogin() {
+  document.getElementById("app").innerHTML = `
+    <div class="flex items-center justify-center h-full">
+      <div class="bg-slate-800 p-8 rounded-xl shadow-xl w-96">
+        <h1 class="text-2xl font-bold mb-1">Poker Arena</h1>
+        <p class="text-slate-400 mb-6 text-sm">Admin Panel</p>
+        <input id="u" placeholder="Username" class="w-full mb-3 px-3 py-2 rounded bg-slate-700 outline-none" />
+        <input id="p" type="password" placeholder="Password" class="w-full mb-4 px-3 py-2 rounded bg-slate-700 outline-none" />
+        <button id="loginBtn" class="w-full bg-emerald-600 hover:bg-emerald-500 py-2 rounded font-medium">Sign in</button>
+        <p id="loginErr" class="text-red-400 text-sm mt-3"></p>
+      </div>
+    </div>`;
+  document.getElementById("loginBtn").onclick = doLogin;
+  document.getElementById("p").onkeydown = (e) => { if (e.key === "Enter") doLogin(); };
+}
+
+async function doLogin() {
+  const username = document.getElementById("u").value.trim();
+  const password = document.getElementById("p").value;
+  const err = document.getElementById("loginErr");
+  err.textContent = "";
+  try {
+    const res = await fetch(API + "/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "login failed");
+    if (!data.user || !data.user.is_admin) throw new Error("not an admin account");
+    token = data.token;
+    localStorage.setItem("admin_token", token);
+    renderShell();
+    showView("dashboard");
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+// ---- Shell ----------------------------------------------------------------
+const NAV = [
+  ["dashboard", "Dashboard"],
+  ["users", "Users"],
+  ["rooms", "Rooms"],
+  ["live", "Live Games"],
+  ["system", "System"],
+];
+
+function renderShell() {
+  document.getElementById("app").innerHTML = `
+    <div class="flex h-full">
+      <aside class="w-56 bg-slate-800 p-4 flex flex-col">
+        <h1 class="text-xl font-bold mb-6">♠ Admin</h1>
+        <nav id="nav" class="flex-1 space-y-1"></nav>
+        <button id="logout" class="text-sm text-slate-400 hover:text-white mt-4">Sign out</button>
+      </aside>
+      <main id="main" class="flex-1 p-8 overflow-auto"></main>
+    </div>`;
+  const nav = document.getElementById("nav");
+  NAV.forEach(([id, label]) => {
+    const b = document.createElement("button");
+    b.className = "w-full text-left px-3 py-2 rounded hover:bg-slate-700";
+    b.textContent = label;
+    b.onclick = () => showView(id);
+    b.id = "nav-" + id;
+    nav.appendChild(b);
+  });
+  document.getElementById("logout").onclick = logout;
+}
+
+function setActive(id) {
+  NAV.forEach(([n]) => {
+    const el = document.getElementById("nav-" + n);
+    if (el) el.className = "w-full text-left px-3 py-2 rounded " +
+      (n === id ? "bg-emerald-600" : "hover:bg-slate-700");
+  });
+}
+
+async function showView(id) {
+  setActive(id);
+  const main = document.getElementById("main");
+  main.innerHTML = `<p class="text-slate-400">Loading…</p>`;
+  try {
+    if (id === "dashboard") await viewDashboard(main);
+    else if (id === "users") await viewUsers(main);
+    else if (id === "rooms") await viewRooms(main);
+    else if (id === "live") await viewLive(main);
+    else if (id === "system") await viewSystem(main);
+  } catch (e) {
+    main.innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+  }
+}
+
+function card(label, value) {
+  return `<div class="bg-slate-800 rounded-xl p-5">
+    <div class="text-slate-400 text-sm">${label}</div>
+    <div class="text-3xl font-bold mt-1">${value}</div>
+  </div>`;
+}
+
+// ---- Dashboard ------------------------------------------------------------
+async function viewDashboard(main) {
+  const d = await api("/dashboard");
+  main.innerHTML = `
+    <h2 class="text-2xl font-bold mb-6">Dashboard</h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      ${card("Online Players", d.online_players)}
+      ${card("Active Rooms", d.active_rooms)}
+      ${card("Games In Progress", d.games_in_progress)}
+      ${card("Hands Today", d.hands_today)}
+      ${card("Total Users", d.total_users)}
+      ${card("Banned Users", d.banned_users)}
+      ${card("Games Today", d.games_today)}
+      ${card("Maintenance", d.maintenance_mode ? "ON" : "off")}
+    </div>`;
+}
+
+// ---- Users ----------------------------------------------------------------
+let userState = { offset: 0, search: "", banned: "" };
+async function viewUsers(main) {
+  const q = new URLSearchParams({ limit: 20, offset: userState.offset });
+  if (userState.search) q.set("search", userState.search);
+  if (userState.banned) q.set("banned", userState.banned);
+  const res = await api("/users?" + q.toString());
+
+  const rows = res.users.map(u => `
+    <tr class="border-b border-slate-700">
+      <td class="py-2 px-3">${u.id}</td>
+      <td class="py-2 px-3">${u.username}</td>
+      <td class="py-2 px-3 text-slate-400">${u.email}</td>
+      <td class="py-2 px-3">${u.chips}</td>
+      <td class="py-2 px-3">${u.is_admin ? "✔" : ""}</td>
+      <td class="py-2 px-3">${u.is_banned ? '<span class="text-red-400">banned</span>' : "active"}</td>
+      <td class="py-2 px-3 text-right">
+        ${u.is_banned
+          ? `<button onclick="unbanUser(${u.id})" class="text-emerald-400 hover:underline">unban</button>`
+          : (u.is_admin ? "" : `<button onclick="banUser(${u.id})" class="text-red-400 hover:underline">ban</button>`)}
+      </td>
+    </tr>`).join("");
+
+  main.innerHTML = `
+    <h2 class="text-2xl font-bold mb-4">Users <span class="text-slate-400 text-base">(${res.total})</span></h2>
+    <div class="flex gap-2 mb-4">
+      <input id="search" value="${userState.search}" placeholder="Search username/email"
+        class="px-3 py-2 rounded bg-slate-700 outline-none" />
+      <select id="banned" class="px-3 py-2 rounded bg-slate-700">
+        <option value="">All</option>
+        <option value="true" ${userState.banned==="true"?"selected":""}>Banned</option>
+        <option value="false" ${userState.banned==="false"?"selected":""}>Active</option>
+      </select>
+      <button id="apply" class="px-4 py-2 bg-emerald-600 rounded">Filter</button>
+    </div>
+    <table class="w-full bg-slate-800 rounded-xl overflow-hidden text-sm">
+      <thead class="bg-slate-700 text-left">
+        <tr><th class="py-2 px-3">ID</th><th class="py-2 px-3">Username</th><th class="py-2 px-3">Email</th>
+        <th class="py-2 px-3">Chips</th><th class="py-2 px-3">Admin</th><th class="py-2 px-3">Status</th><th></th></tr>
+      </thead>
+      <tbody>${rows || `<tr><td class="p-4 text-slate-400" colspan="7">No users</td></tr>`}</tbody>
+    </table>
+    <div class="flex gap-2 mt-4">
+      <button id="prev" class="px-3 py-1 bg-slate-700 rounded ${userState.offset===0?"opacity-40":""}">Prev</button>
+      <button id="next" class="px-3 py-1 bg-slate-700 rounded ${userState.offset+20>=res.total?"opacity-40":""}">Next</button>
+    </div>`;
+
+  document.getElementById("apply").onclick = () => {
+    userState.search = document.getElementById("search").value.trim();
+    userState.banned = document.getElementById("banned").value;
+    userState.offset = 0;
+    showView("users");
+  };
+  document.getElementById("prev").onclick = () => { if (userState.offset>0){ userState.offset-=20; showView("users"); } };
+  document.getElementById("next").onclick = () => { if (userState.offset+20<res.total){ userState.offset+=20; showView("users"); } };
+}
+
+async function banUser(id) {
+  const reason = prompt("Ban reason:");
+  if (reason === null) return;
+  const mins = prompt("Duration in minutes (blank = permanent):", "");
+  const body = mins ? { reason, duration_minutes: parseInt(mins, 10) } : { reason, permanent: true };
+  try { await api(`/users/${id}/ban`, { method: "POST", body: JSON.stringify(body) }); showView("users"); }
+  catch (e) { alert(e.message); }
+}
+async function unbanUser(id) {
+  try { await api(`/users/${id}/unban`, { method: "POST" }); showView("users"); }
+  catch (e) { alert(e.message); }
+}
+
+// ---- Rooms ----------------------------------------------------------------
+async function viewRooms(main) {
+  const res = await api("/rooms?limit=50");
+  const rows = res.rooms.map(r => `
+    <tr class="border-b border-slate-700">
+      <td class="py-2 px-3">${r.id}</td>
+      <td class="py-2 px-3">${r.name}</td>
+      <td class="py-2 px-3">${r.status}</td>
+      <td class="py-2 px-3">${r.player_count}/${r.max_players}</td>
+      <td class="py-2 px-3">${r.small_blind}/${r.big_blind}</td>
+      <td class="py-2 px-3">${r.has_live_game ? '<span class="text-emerald-400">live</span>' : ""}</td>
+      <td class="py-2 px-3 text-right space-x-2">
+        ${r.has_live_game ? `<button onclick="endGame(${r.id})" class="text-amber-400 hover:underline">end</button>` : ""}
+        <button onclick="closeRoom(${r.id})" class="text-red-400 hover:underline">close</button>
+      </td>
+    </tr>`).join("");
+  main.innerHTML = `
+    <h2 class="text-2xl font-bold mb-4">Rooms <span class="text-slate-400 text-base">(${res.total})</span></h2>
+    <table class="w-full bg-slate-800 rounded-xl overflow-hidden text-sm">
+      <thead class="bg-slate-700 text-left">
+        <tr><th class="py-2 px-3">ID</th><th class="py-2 px-3">Name</th><th class="py-2 px-3">Status</th>
+        <th class="py-2 px-3">Players</th><th class="py-2 px-3">Blinds</th><th class="py-2 px-3">Game</th><th></th></tr>
+      </thead>
+      <tbody>${rows || `<tr><td class="p-4 text-slate-400" colspan="7">No rooms</td></tr>`}</tbody>
+    </table>`;
+}
+async function endGame(id) {
+  if (!confirm("Force end the current game in room " + id + "?")) return;
+  try { await api(`/rooms/${id}/end`, { method: "POST" }); showView("rooms"); } catch (e) { alert(e.message); }
+}
+async function closeRoom(id) {
+  if (!confirm("Force close room " + id + "?")) return;
+  try { await api(`/rooms/${id}`, { method: "DELETE" }); showView("rooms"); } catch (e) { alert(e.message); }
+}
+
+// ---- Live games -----------------------------------------------------------
+async function viewLive(main) {
+  const res = await api("/live-games");
+  const rows = (res.games || []).map(g => `
+    <tr class="border-b border-slate-700">
+      <td class="py-2 px-3">${g.room_id}</td>
+      <td class="py-2 px-3">${g.game_id}</td>
+      <td class="py-2 px-3">${g.phase}</td>
+      <td class="py-2 px-3">${g.player_count}</td>
+      <td class="py-2 px-3">${g.pot}</td>
+      <td class="py-2 px-3">${g.current_bet}</td>
+    </tr>`).join("");
+  main.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold">Live Games</h2>
+      <button onclick="showView('live')" class="px-3 py-1 bg-slate-700 rounded text-sm">Refresh</button>
+    </div>
+    <table class="w-full bg-slate-800 rounded-xl overflow-hidden text-sm">
+      <thead class="bg-slate-700 text-left">
+        <tr><th class="py-2 px-3">Room</th><th class="py-2 px-3">Game</th><th class="py-2 px-3">Phase</th>
+        <th class="py-2 px-3">Players</th><th class="py-2 px-3">Pot</th><th class="py-2 px-3">Current Bet</th></tr>
+      </thead>
+      <tbody>${rows || `<tr><td class="p-4 text-slate-400" colspan="6">No games in progress</td></tr>`}</tbody>
+    </table>`;
+}
+
+// ---- System ---------------------------------------------------------------
+async function viewSystem(main) {
+  const h = await api("/system/health");
+  main.innerHTML = `
+    <h2 class="text-2xl font-bold mb-4">System</h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      ${card("Status", h.status)}
+      ${card("Database", h.database ? "✔" : "✗")}
+      ${card("Redis", h.redis ? "✔" : "✗")}
+      ${card("Games In Progress", h.games_in_progress)}
+    </div>
+    <div class="bg-slate-800 rounded-xl p-5">
+      <h3 class="font-semibold mb-3">Maintenance Mode</h3>
+      <p class="text-slate-400 text-sm mb-3">When enabled, non-admins cannot create new rooms.</p>
+      <button id="maint" class="px-4 py-2 rounded ${h.maintenance_mode ? "bg-red-600" : "bg-emerald-600"}">
+        ${h.maintenance_mode ? "Disable maintenance" : "Enable maintenance"}
+      </button>
+    </div>`;
+  document.getElementById("maint").onclick = async () => {
+    try { await api("/maintenance", { method: "POST", body: JSON.stringify({ enabled: !h.maintenance_mode }) }); showView("system"); }
+    catch (e) { alert(e.message); }
+  };
+}
+
+// ---- Boot -----------------------------------------------------------------
+if (token) { renderShell(); showView("dashboard"); } else { renderLogin(); }
+</script>
+</body>
+</html>

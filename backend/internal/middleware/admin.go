@@ -110,3 +110,43 @@ func (am *AdminMiddleware) InvalidateBanCache(userID uint) {
 	}
 	am.Redis.Del(context.Background(), banCacheKey(userID))
 }
+
+// maintenanceKey is the Redis key holding the maintenance-mode flag.
+const maintenanceKey = "system:maintenance"
+
+// SetMaintenance enables or disables maintenance mode platform-wide. When
+// enabled, new room creation is blocked (admins are exempt).
+func (am *AdminMiddleware) SetMaintenance(enabled bool) error {
+	if am.Redis == nil {
+		return fmt.Errorf("redis unavailable")
+	}
+	val := "0"
+	if enabled {
+		val = "1"
+	}
+	return am.Redis.Set(context.Background(), maintenanceKey, val, 0).Err()
+}
+
+// IsMaintenance reports whether maintenance mode is currently enabled.
+func (am *AdminMiddleware) IsMaintenance() bool {
+	if am.Redis == nil {
+		return false
+	}
+	val, err := am.Redis.Get(context.Background(), maintenanceKey).Result()
+	return err == nil && val == "1"
+}
+
+// BlockDuringMaintenance returns a middleware that rejects requests while
+// maintenance mode is active. Admins (is_admin set by JWTAuth) bypass the
+// block so they can keep managing the platform.
+func (am *AdminMiddleware) BlockDuringMaintenance() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if isAdmin, _ := c.Locals("is_admin").(bool); isAdmin {
+			return c.Next()
+		}
+		if am.IsMaintenance() {
+			return c.Status(503).JSON(fiber.Map{"error": "service under maintenance"})
+		}
+		return c.Next()
+	}
+}

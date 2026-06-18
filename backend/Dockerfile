@@ -32,6 +32,10 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 # definition. Running as non-root (uid 65532) limits blast radius.
 COPY --from=builder /poker-server /poker-server
 
+# Static admin panel assets (served at /admin/). The server resolves these
+# relative to its working directory, so keep them at /web/admin.
+COPY --from=builder /app/web /web
+
 USER 65532:65532
 
 EXPOSE 8080

@@ -14,6 +14,7 @@ import (
 type Claims struct {
 	UserID   uint   `json:"user_id"`
 	Username string `json:"username"`
+	IsAdmin  bool   `json:"is_admin"`
 	jwt.RegisteredClaims
 }
 
@@ -33,11 +34,20 @@ func ValidateJWTSecret() error {
 	return nil
 }
 
-// GenerateToken creates a JWT token for a user
+// GenerateToken creates a JWT token for a non-admin user. Kept for backward
+// compatibility; use GenerateTokenWithRole to embed the admin role.
 func GenerateToken(userID uint, username string) (string, error) {
+	return GenerateTokenWithRole(userID, username, false)
+}
+
+// GenerateTokenWithRole creates a JWT token carrying the user's admin role so
+// admin authorization can be checked from the token without a DB round-trip on
+// every request (the DB remains the source of truth for sensitive actions).
+func GenerateTokenWithRole(userID uint, username string, isAdmin bool) (string, error) {
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
+		IsAdmin:  isAdmin,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -84,6 +94,7 @@ func JWTAuth() fiber.Handler {
 
 		c.Locals("user_id", claims.UserID)
 		c.Locals("username", claims.Username)
+		c.Locals("is_admin", claims.IsAdmin)
 
 		return c.Next()
 	}

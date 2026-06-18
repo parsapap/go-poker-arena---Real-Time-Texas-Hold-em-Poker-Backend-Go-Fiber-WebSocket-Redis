@@ -38,6 +38,7 @@ type Config struct {
 	BodyLimitBytes  int
 	RequestTimeout  time.Duration
 	APIRateLimit    int
+	AdminRateLimit  int
 	WSMaxConns      int
 
 	DB    DBConfig
@@ -82,6 +83,7 @@ func Load() (*Config, error) {
 		BodyLimitBytes: getEnvInt("BODY_LIMIT_BYTES", 1<<20), // 1 MiB
 		RequestTimeout: time.Duration(getEnvInt("REQUEST_TIMEOUT_SECONDS", 30)) * time.Second,
 		APIRateLimit:   getEnvInt("API_RATE_LIMIT", 100),
+		AdminRateLimit: getEnvInt("ADMIN_RATE_LIMIT", 30),
 		WSMaxConns:     getEnvInt("WS_MAX_CONNECTIONS", 5),
 		DB: DBConfig{
 			Host:         os.Getenv("POSTGRES_HOST"),

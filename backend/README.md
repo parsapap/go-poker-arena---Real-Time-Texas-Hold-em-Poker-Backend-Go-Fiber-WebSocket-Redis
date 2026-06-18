@@ -103,6 +103,60 @@ ws://<host>/ws?token=<JWT>&room_id=<id>
 
 See [../API.md](../API.md) for the full API reference.
 
+## Admin Panel
+
+The platform ships with an admin panel: a backend API under `/api/admin` and a
+lightweight static web UI served at `/admin/`.
+
+### Creating the first admin
+
+Admin access is gated by the `is_admin` flag on a user (and the `is_admin` JWT
+claim issued at login). Use the `createadmin` command to create or promote one:
+
+```bash
+# Create a brand-new admin
+go run ./cmd/createadmin -username root -email root@example.com -password 'StrongPass123!'
+
+# Promote an existing user to admin (password unchanged)
+go run ./cmd/createadmin -username existinguser
+```
+
+It reads the same `POSTGRES_*` env vars as the server.
+
+### Accessing the panel
+
+1. Open `http://<host>:<port>/admin/` in a browser.
+2. Sign in with an admin account. Non-admin accounts are rejected.
+3. The UI calls the `/api/admin/*` endpoints with the JWT from login.
+
+### Admin endpoints
+
+All require a valid JWT **and** `is_admin`; they have a stricter rate limit
+(`ADMIN_RATE_LIMIT`, default 30/min) and every mutating action is written to the
+structured audit log (`audit=admin_action` with `admin_id`, `request_id`, `ip`).
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/admin/dashboard` | Overview stats (online players, rooms, games, hands today) |
+| GET | `/api/admin/metrics` | Prometheus metrics (authenticated) |
+| GET | `/api/admin/live-games` | Snapshot of in-progress games |
+| GET | `/api/admin/system/health` | Detailed DB/Redis/maintenance health |
+| POST | `/api/admin/maintenance` | `{"enabled":true|false}` — toggle maintenance mode |
+| GET | `/api/admin/users` | List users (`?limit&offset&search&banned=true\|false`) |
+| GET | `/api/admin/users/:id` | User detail (stats + recent games + bans) |
+| GET | `/api/admin/users/:id/history` | Recent game history (`?limit`) |
+| POST | `/api/admin/users/:id/ban` | `{"reason","permanent":bool,"duration_minutes":int}` |
+| POST | `/api/admin/users/:id/unban` | Lift a ban |
+| GET | `/api/admin/rooms` | List rooms (`?status&min_big_blind&limit&offset`) |
+| GET | `/api/admin/rooms/:id` | Room detail + live game state |
+| POST | `/api/admin/rooms/:id/end` | Force-end the current game |
+| POST | `/api/admin/rooms/:id/kick/:playerId` | Kick a player from a room |
+| DELETE | `/api/admin/rooms/:id` | Force-close a room |
+
+**Maintenance mode:** while enabled, non-admin users cannot create new rooms
+(they receive `503`); admins are exempt.
+
+
 ## Architecture overview
 
 ```

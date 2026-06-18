@@ -664,3 +664,119 @@ func (m *Manager) getWinners(game *poker.Game) []map[string]interface{} {
 
 	return winners
 }
+
+// ---------------------------------------------------------------------------
+// Admin support methods
+// ---------------------------------------------------------------------------
+
+// LiveGameInfo is a lightweight snapshot of an in-progress game for admin views.
+type LiveGameInfo struct {
+	RoomID      uint   `json:"room_id"`
+	GameID      uint   `json:"game_id"`
+	Phase       string `json:"phase"`
+	PlayerCount int    `json:"player_count"`
+	Pot         int64  `json:"pot"`
+	CurrentBet  int64  `json:"current_bet"`
+}
+
+// ListLiveGames returns a snapshot of all in-memory games currently in progress.
+// It takes the read lock so it is safe to call concurrently with gameplay.
+func (m *Manager) ListLiveGames() []LiveGameInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]LiveGameInfo, 0, len(m.Games))
+	for roomID, g := range m.Games {
+		pot := int64(0)
+		for _, p := range g.Pots {
+			pot += p.Amount
+		}
+		out = append(out, LiveGameInfo{
+			RoomID:      roomID,
+			GameID:      g.ID,
+			Phase:       string(g.Phase),
+			PlayerCount: len(g.Players),
+			Pot:         pot,
+			CurrentBet:  g.CurrentBet,
+		})
+	}
+	return out
+}
+
+// LiveGameCount returns the number of games currently in progress.
+func (m *Manager) LiveGameCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.Games)
+}
+
+// GameState returns a sanitized full game-state snapshot for a room, or an
+// error if no live game exists. Hole cards are hidden (forPlayerID = 0).
+func (m *Manager) GameState(roomID uint) (map[string]interface{}, error) {
+	game, ok := m.getGame(roomID)
+	if !ok {
+		return nil, fmt.Errorf("no active game for room %d", roomID)
+	}
+	return m.serializeGameState(game, 0), nil
+}
+
+// ForceEndGame ends the in-progress game in a room immediately (admin action).
+// It reuses EndRound so chips and winners are settled consistently.
+func (m *Manager) ForceEndGame(roomID uint) error {
+	if _, ok := m.getGame(roomID); !ok {
+		return fmt.Errorf("no active game for room %d", roomID)
+	}
+	return m.EndRound(roomID)
+}
+
+// KickPlayer removes a player from a room's membership set and broadcasts a
+// kick event. It does not forcibly end an in-progress hand; the player simply
+// won't be seated for the next one.
+func (m *Manager) KickPlayer(roomID, userID uint) error {
+	ctx := context.Background()
+	key := fmt.Sprintf("room:%d:players", roomID)
+	removed, err := m.Redis.SRem(ctx, key, userID).Result()
+	if err != nil {
+		return err
+	}
+	if removed == 0 {
+		return fmt.Errorf("player %d is not in room %d", userID, roomID)
+	}
+	m.invalidateRoomCache(ctx, roomID)
+
+	kickData, _ := json.Marshal(map[string]interface{}{
+		"type":      "player_kicked",
+		"room_id":   fmt.Sprintf("%d", roomID),
+		"player_id": userID,
+	})
+	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), kickData)
+	return nil
+}
+
+// CloseRoom force-closes a room: ends any live game, marks the room finished,
+// clears its membership set, and clears caches. Soft-deletes the DB row.
+func (m *Manager) CloseRoom(roomID uint) error {
+	ctx := context.Background()
+
+	// End any in-progress game first so chips settle.
+	if _, ok := m.getGame(roomID); ok {
+		_ = m.EndRound(roomID)
+	}
+
+	// Mark finished and clear membership + caches.
+	if err := m.DB.Model(&models.Room{}).Where("id = ?", roomID).Update("status", "finished").Error; err != nil {
+		return err
+	}
+	m.Redis.Del(ctx, fmt.Sprintf("room:%d:players", roomID))
+	m.Redis.Del(ctx, fmt.Sprintf("room:%d:starting", roomID))
+	m.invalidateRoomCache(ctx, roomID)
+
+	closeData, _ := json.Marshal(map[string]interface{}{
+		"type":    "room_closed",
+		"room_id": fmt.Sprintf("%d", roomID),
+	})
+	m.Redis.Publish(ctx, fmt.Sprintf("room:%d", roomID), closeData)
+
+	// Soft-delete the room row.
+	return m.DB.Delete(&models.Room{}, roomID).Error
+}

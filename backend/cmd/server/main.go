@@ -11,6 +11,7 @@ import (
 
 	"go-poker-arena/internal/anticheat"
 	"go-poker-arena/internal/auth"
+	"go-poker-arena/internal/admin"
 	"go-poker-arena/internal/config"
 	"go-poker-arena/internal/database"
 	"go-poker-arena/internal/history"
@@ -172,6 +173,10 @@ func main() {
 
 	app.Get("/metrics", metrics.MetricsHandler())
 
+	// Serve the static admin panel SPA at /admin/. The HTML talks to the
+	// /api/admin endpoints using a JWT obtained via /auth/login.
+	app.Static("/admin", "./web/admin")
+
 	// Public auth endpoints
 	setupAuthRoutes(app, authService)
 
@@ -180,8 +185,13 @@ func main() {
 	api.Use(middleware.JWTAuth())
 	api.Use(adminMiddleware.CheckBanned())
 
-	setupAPIRoutes(api, roomManager, historyService, leaderboardManager, matchmakingQueue, anticheatValidator)
-	setupAdminRoutes(api, adminMiddleware, roomManager, authService)
+	setupAPIRoutes(api, roomManager, historyService, leaderboardManager, matchmakingQueue, anticheatValidator, adminMiddleware)
+
+	// Admin panel routes (JWT already applied to /api; the handler adds the
+	// admin-role check and a stricter rate limit).
+	adminService := admin.NewService(db, redisClient, roomManager)
+	adminHandler := admin.NewHandler(adminService, adminMiddleware)
+	adminHandler.Register(api, rateLimiter, cfg.AdminRateLimit)
 
 	// WebSocket endpoint
 	setupWebSocketRoute(app, hub, roomManager, rateLimiter, cfg)
@@ -274,19 +284,19 @@ func setupAuthRoutes(app *fiber.App, authService *auth.Service) {
 		user.LastIP = c.IP()
 		authService.UpdateUser(user)
 
-		token, err := middleware.GenerateToken(user.ID, user.Username)
+		token, err := middleware.GenerateTokenWithRole(user.ID, user.Username, user.IsAdmin)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": "Failed to generate token"})
 		}
 
-		logger.Info().Uint("user_id", user.ID).Str("username", user.Username).Msg("User logged in")
+		logger.Info().Uint("user_id", user.ID).Str("username", user.Username).Bool("is_admin", user.IsAdmin).Msg("User logged in")
 		return c.JSON(fiber.Map{"user": user, "token": token})
 	})
 }
 
 func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService *history.Service, 
 	leaderboardManager *leaderboard.Leaderboard, matchmakingQueue *matchmaking.Queue, 
-	anticheatValidator *anticheat.Validator) {
+	anticheatValidator *anticheat.Validator, adminMiddleware *middleware.AdminMiddleware) {
 	
 	// Room endpoints
 	api.Get("/rooms", func(c *fiber.Ctx) error {
@@ -328,6 +338,11 @@ func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService
 	})
 
 	api.Post("/rooms", func(c *fiber.Ctx) error {
+		// Block new room creation while in maintenance mode (admins exempt).
+		if isAdmin, _ := c.Locals("is_admin").(bool); !isAdmin && adminMiddleware.IsMaintenance() {
+			return c.Status(503).JSON(fiber.Map{"error": "service under maintenance"})
+		}
+
 		var req struct {
 			Name       string `json:"name"`
 			MaxPlayers int    `json:"max_players"`
@@ -544,66 +559,6 @@ func setupAPIRoutes(api fiber.Router, roomManager *rooms.Manager, historyService
 		metrics.PlayersInQueue.Set(float64(size))
 
 		return c.JSON(fiber.Map{"status": "left"})
-	})
-}
-
-func setupAdminRoutes(api fiber.Router, adminMiddleware *middleware.AdminMiddleware, 
-	roomManager *rooms.Manager, authService *auth.Service) {
-	
-	admin := api.Group("/admin", adminMiddleware.RequireAdmin())
-
-	admin.Get("/rooms", func(c *fiber.Ctx) error {
-		rooms, err := roomManager.ListRooms()
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-		return c.JSON(rooms)
-	})
-
-	admin.Post("/ban", func(c *fiber.Ctx) error {
-		adminID := c.Locals("user_id").(uint)
-
-		var req struct {
-			UserID    uint   `json:"user_id"`
-			Reason    string `json:"reason"`
-			Permanent bool   `json:"permanent"`
-		}
-
-		if err := c.BodyParser(&req); err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
-		}
-
-		err := authService.BanUser(req.UserID, adminID, req.Reason, req.Permanent)
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-
-		// Invalidate cached ban status so the ban takes effect immediately.
-		adminMiddleware.InvalidateBanCache(req.UserID)
-
-		logger.Info().Uint("admin_id", adminID).Uint("user_id", req.UserID).Str("reason", req.Reason).Msg("User banned")
-		return c.JSON(fiber.Map{"status": "user banned"})
-	})
-
-	admin.Post("/unban", func(c *fiber.Ctx) error {
-		var req struct {
-			UserID uint `json:"user_id"`
-		}
-
-		if err := c.BodyParser(&req); err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
-		}
-
-		err := authService.UnbanUser(req.UserID)
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-
-		// Invalidate cached ban status so the unban takes effect immediately.
-		adminMiddleware.InvalidateBanCache(req.UserID)
-
-		logger.Info().Uint("user_id", req.UserID).Msg("User unbanned")
-		return c.JSON(fiber.Map{"status": "user unbanned"})
 	})
 }
 
