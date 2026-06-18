@@ -55,6 +55,12 @@ func (rl *RateLimiter) Limit(requests int, window time.Duration) fiber.Handler {
 }
 
 // WebSocketLimit limits WebSocket connections per user
+// wsConnTTL bounds how long a WebSocket connection counter entry lives. It is
+// refreshed on every successful connect. A relatively short TTL means that if
+// a decrement is ever missed (abrupt disconnect, crash, reconnect storm), the
+// leaked count self-heals quickly instead of blocking the user for an hour.
+const wsConnTTL = 2 * time.Minute
+
 // WebSocketLimit limits concurrent WebSocket connections per user. It must run
 // AFTER WebSocketAuth so the authenticated user_id is available in c.Locals;
 // it falls back to the client IP for unauthenticated contexts.
@@ -74,9 +80,12 @@ func (rl *RateLimiter) WebSocketLimit(maxConnections int) fiber.Handler {
 			})
 		}
 
-		// Increment connection count
-		rl.Redis.Incr(ctx, key)
-		rl.Redis.Expire(ctx, key, 1*time.Hour)
+		// Increment connection count and refresh the (short) TTL so a missed
+		// decrement can't lock the user out beyond wsConnTTL.
+		pipe := rl.Redis.Pipeline()
+		pipe.Incr(ctx, key)
+		pipe.Expire(ctx, key, wsConnTTL)
+		pipe.Exec(ctx)
 
 		return c.Next()
 	}
@@ -91,10 +100,15 @@ func wsLimitID(c *fiber.Ctx) string {
 	return "ip:" + c.IP()
 }
 
-// DecrementWSConnection decrements WebSocket connection count. The id MUST match
-// the value produced by wsLimitID at connect time (e.g. "u:<id>" or "ip:<ip>").
+// DecrementWSConnection decrements the WebSocket connection count for an id. The
+// id MUST match the value produced by wsLimitID at connect time (e.g. "u:<id>"
+// or "ip:<ip>"). It floors the counter at zero: a decrement that would push the
+// value negative deletes the key instead, so a stale negative count can never
+// silently absorb a real future connection.
 func (rl *RateLimiter) DecrementWSConnection(id string) {
 	key := fmt.Sprintf("ws:connections:%s", id)
 	ctx := context.Background()
-	rl.Redis.Decr(ctx, key)
+	if n, err := rl.Redis.Decr(ctx, key).Result(); err == nil && n <= 0 {
+		rl.Redis.Del(ctx, key)
+	}
 }

@@ -145,7 +145,13 @@ export default function LobbyPage() {
       if (!userData) return
 
       const user = JSON.parse(userData)
-      const socket = new WebSocket(`${wsUrl}/ws?user_id=${user.id}&username=${user.username}&room_id=lobby`)
+      if (!token) return
+
+      // The backend authenticates the WebSocket via JWT. Identity comes from
+      // the verified token (?token=), not user_id/username query params.
+      const socket = new WebSocket(
+        `${wsUrl}/ws?token=${encodeURIComponent(token)}&room_id=lobby`
+      )
 
       socket.onopen = () => {
         console.log('WebSocket connected')

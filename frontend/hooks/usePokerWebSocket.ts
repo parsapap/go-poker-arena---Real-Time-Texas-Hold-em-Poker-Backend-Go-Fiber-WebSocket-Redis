@@ -309,10 +309,13 @@ export function usePokerWebSocket({
       if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return
 
       const wsUrl = getWebSocketUrl()
-      const url = `${wsUrl}/ws?user_id=${userId}&username=${encodeURIComponent(username)}&room_id=${roomId}`
-      
-      logger.info(`Connecting to ${url}`)
-      
+      // The backend authenticates the WebSocket via JWT (?token=). Identity is
+      // derived from the verified token, not user_id/username query params.
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      const url = `${wsUrl}/ws?token=${encodeURIComponent(token || '')}&room_id=${roomId}`
+
+      logger.info(`Connecting to ${wsUrl}/ws (room ${roomId})`)
+
       socket = new WebSocket(url)
       wsRef.current = socket
 
