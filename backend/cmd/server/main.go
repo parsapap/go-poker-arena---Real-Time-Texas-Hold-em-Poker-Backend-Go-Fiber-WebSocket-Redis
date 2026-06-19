@@ -596,6 +596,16 @@ func setupWebSocketRoute(app *fiber.App, hub *websocket.Hub, roomManager *rooms.
 		username, _ := c.Locals("username").(string)
 		roomID := c.Query("room_id", "")
 
+		// Count this connection only now that it's actually established, and
+		// always release it on disconnect. Keeping increment and decrement
+		// together (rather than incrementing in middleware) prevents the
+		// counter from leaking on reconnect storms / failed upgrades.
+		wsLimitKey := fmt.Sprintf("ip:%s", c.RemoteAddr().String())
+		if uid != 0 {
+			wsLimitKey = fmt.Sprintf("u:%d", uid)
+		}
+		rateLimiter.IncrementWSConnection(wsLimitKey)
+
 		client := &websocket.Client{
 			Hub:         hub,
 			Conn:        c,
@@ -612,13 +622,8 @@ func setupWebSocketRoute(app *fiber.App, hub *websocket.Hub, roomManager *rooms.
 		go client.WritePump()
 		client.ReadPump()
 
-		// Mirror the key format produced by wsLimitID at connect time so the
-		// per-user connection counter is decremented correctly on disconnect.
-		if uid != 0 {
-			rateLimiter.DecrementWSConnection(fmt.Sprintf("u:%d", uid))
-		} else {
-			rateLimiter.DecrementWSConnection("ip:" + c.RemoteAddr().String())
-		}
+		// Release the connection slot. The key matches the one used at connect.
+		rateLimiter.DecrementWSConnection(wsLimitKey)
 		logger.Info().Uint("user_id", uid).Msg("WebSocket disconnected")
 	}))
 }

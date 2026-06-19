@@ -1,0 +1,9 @@
+# Build artifacts
+/bin/
+*.out
+coverage.html
+
+# Local dev helpers / env
+run-local.sh
+.env.predeploy
+.env.admintest

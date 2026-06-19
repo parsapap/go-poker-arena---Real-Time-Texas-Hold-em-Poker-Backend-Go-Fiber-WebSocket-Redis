@@ -84,7 +84,7 @@ func Load() (*Config, error) {
 		RequestTimeout: time.Duration(getEnvInt("REQUEST_TIMEOUT_SECONDS", 30)) * time.Second,
 		APIRateLimit:   getEnvInt("API_RATE_LIMIT", 100),
 		AdminRateLimit: getEnvInt("ADMIN_RATE_LIMIT", 30),
-		WSMaxConns:     getEnvInt("WS_MAX_CONNECTIONS", 5),
+		WSMaxConns:     getEnvInt("WS_MAX_CONNECTIONS", 10),
 		DB: DBConfig{
 			Host:         os.Getenv("POSTGRES_HOST"),
 			Port:         getEnv("POSTGRES_PORT", "5432"),

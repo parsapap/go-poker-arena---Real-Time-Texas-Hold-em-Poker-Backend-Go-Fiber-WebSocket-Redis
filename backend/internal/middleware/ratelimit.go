@@ -61,34 +61,42 @@ func (rl *RateLimiter) Limit(requests int, window time.Duration) fiber.Handler {
 // leaked count self-heals quickly instead of blocking the user for an hour.
 const wsConnTTL = 2 * time.Minute
 
-// WebSocketLimit limits concurrent WebSocket connections per user. It must run
-// AFTER WebSocketAuth so the authenticated user_id is available in c.Locals;
-// it falls back to the client IP for unauthenticated contexts.
+// WebSocketLimit rejects a WebSocket upgrade when the user already has the
+// maximum number of concurrent connections. It MUST run AFTER WebSocketAuth so
+// the authenticated user_id is available; it falls back to the client IP.
+//
+// This middleware is READ-ONLY: it only checks the current count. The actual
+// increment/decrement happens in the connection handler (IncrementWSConnection
+// on connect, DecrementWSConnection on disconnect) so the two are symmetric and
+// tied to the real connection lifecycle. Incrementing here instead would leak
+// counts for upgrade attempts that never become live connections (reconnect
+// storms, double-mounts, failed upgrades).
 func (rl *RateLimiter) WebSocketLimit(maxConnections int) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		key := fmt.Sprintf("ws:connections:%s", wsLimitID(c))
-		ctx := context.Background()
-
-		count, err := rl.Redis.Get(ctx, key).Int()
+		count, err := rl.Redis.Get(context.Background(), key).Int()
 		if err != nil && err != redis.Nil {
 			return c.Status(500).JSON(fiber.Map{"error": "connection check failed"})
 		}
-
 		if count >= maxConnections {
 			return c.Status(429).JSON(fiber.Map{
 				"error": "max WebSocket connections reached",
 			})
 		}
-
-		// Increment connection count and refresh the (short) TTL so a missed
-		// decrement can't lock the user out beyond wsConnTTL.
-		pipe := rl.Redis.Pipeline()
-		pipe.Incr(ctx, key)
-		pipe.Expire(ctx, key, wsConnTTL)
-		pipe.Exec(ctx)
-
 		return c.Next()
 	}
+}
+
+// IncrementWSConnection records a newly-established WebSocket connection for an
+// id ("u:<id>" or "ip:<ip>"). It refreshes a short TTL so a missed decrement
+// self-heals quickly instead of locking the user out.
+func (rl *RateLimiter) IncrementWSConnection(id string) {
+	key := fmt.Sprintf("ws:connections:%s", id)
+	ctx := context.Background()
+	pipe := rl.Redis.Pipeline()
+	pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, wsConnTTL)
+	pipe.Exec(ctx)
 }
 
 // wsLimitID derives the per-connection rate-limit identity: the authenticated

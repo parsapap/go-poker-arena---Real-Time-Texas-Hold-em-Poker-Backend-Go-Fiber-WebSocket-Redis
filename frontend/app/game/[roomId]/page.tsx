@@ -70,6 +70,29 @@ function GamePageContent() {
     }
   }
 
+  // Authoritative chip/bet values for the current player come from the game
+  // store (server-synced), not localStorage (which is stale after a hand).
+  const me = players.find((p) => p.id === user?.id)
+  const myChips = me?.chips ?? user?.chips ?? 0 // remaining stack
+  const myBet = me?.bet ?? 0                     // already committed this round
+  const maxRaiseTo = myBet + myChips             // total bet if going all-in
+  const minRaiseTo = Math.max((currentBet || 0) * 2, (currentBet || 0) + 20, 20)
+
+  // handleRaise translates the slider's "raise to" total into what the backend
+  // expects. The engine treats a raise `amount` as the increment ABOVE the
+  // current bet (it needs currentBet - myBet + amount chips). Committing the
+  // whole stack must use the dedicated `allin` action, otherwise the required
+  // chips exceed the stack and the server rejects it as "insufficient chips".
+  const handleRaise = () => {
+    const raiseTo = Math.min(raiseAmount, maxRaiseTo)
+    if (raiseTo >= maxRaiseTo) {
+      handleAction('allin')
+      return
+    }
+    const increment = raiseTo - (currentBet || 0)
+    handleAction('raise', increment)
+  }
+
   const handleSendChat = () => {
     if (!chatInput.trim()) return
     sendChat(chatInput)
@@ -290,16 +313,18 @@ function GamePageContent() {
               {/* Raise slider */}
               <div className="mb-3">
                 <div className="flex justify-between text-xs sm:text-sm mb-1.5">
-                  <span className="text-gray-400">Raise</span>
-                  <span className="text-amber-400 font-bold">${raiseAmount}</span>
+                  <span className="text-gray-400">Raise to</span>
+                  <span className="text-amber-400 font-bold">
+                    ${Math.min(raiseAmount, maxRaiseTo)}{Math.min(raiseAmount, maxRaiseTo) >= maxRaiseTo ? ' (All-in)' : ''}
+                  </span>
                 </div>
-                <input type="range" min={Math.max((currentBet || 0) * 2, 20)} max={user?.chips || 1000} step="10"
-                  value={raiseAmount} onChange={(e) => setRaiseAmount(Number(e.target.value))}
+                <input type="range" min={Math.min(minRaiseTo, maxRaiseTo)} max={maxRaiseTo} step="10"
+                  value={Math.min(raiseAmount, maxRaiseTo)} onChange={(e) => setRaiseAmount(Number(e.target.value))}
                   className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
                 <div className="flex justify-between text-[10px] sm:text-xs text-gray-500 mt-1">
-                  <button onClick={() => setRaiseAmount(Math.max((currentBet || 0) * 2, 20))} className="hover:text-white">Min</button>
-                  <button onClick={() => setRaiseAmount(Math.max(pot || 50, 50))} className="hover:text-white">Pot</button>
-                  <button onClick={() => setRaiseAmount(user?.chips || 1000)} className="hover:text-white">All-in</button>
+                  <button onClick={() => setRaiseAmount(Math.min(minRaiseTo, maxRaiseTo))} className="hover:text-white">Min</button>
+                  <button onClick={() => setRaiseAmount(Math.min(Math.max(pot || 50, minRaiseTo), maxRaiseTo))} className="hover:text-white">Pot</button>
+                  <button onClick={() => setRaiseAmount(maxRaiseTo)} className="hover:text-white">All-in</button>
                 </div>
               </div>
 
@@ -313,9 +338,9 @@ function GamePageContent() {
                   className="py-3 sm:py-4 rounded-xl font-bold text-sm sm:text-base bg-gray-700 border border-gray-600 active:bg-gray-600">
                   {currentBet > 0 ? `Call $${currentBet}` : 'Check'}
                 </motion.button>
-                <motion.button whileTap={{ scale: 0.95 }} onClick={() => handleAction('raise', raiseAmount)}
+                <motion.button whileTap={{ scale: 0.95 }} onClick={handleRaise}
                   className="py-3 sm:py-4 rounded-xl font-bold text-sm sm:text-base bg-emerald-600 active:bg-emerald-500 shadow-lg shadow-emerald-500/30">
-                  Raise
+                  {Math.min(raiseAmount, maxRaiseTo) >= maxRaiseTo ? 'All-in' : 'Raise'}
                 </motion.button>
               </div>
             </motion.div>

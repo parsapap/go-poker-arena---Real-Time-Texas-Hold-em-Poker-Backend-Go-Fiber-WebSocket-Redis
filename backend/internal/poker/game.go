@@ -263,10 +263,51 @@ func (g *Game) ProcessAction(playerID uint, action Action, amount int64) error {
 
 	// Check if betting round is complete
 	if g.isBettingRoundComplete() {
-		return g.NextPhase()
+		return g.advance()
 	}
 
 	return nil
+}
+
+// advance moves the hand forward after a betting round completes. Normally it
+// just opens the next street. But when no further betting is possible — every
+// remaining contender is all-in (or only one can act) while two or more are
+// still contesting the pot — it deals out all remaining streets and runs the
+// showdown. Without this, an all-in confrontation stalls because NextPhase
+// advances only one street per call and no further player actions will arrive.
+func (g *Game) advance() error {
+	if err := g.NextPhase(); err != nil {
+		return err
+	}
+	for g.Phase != PhaseShowdown && g.Phase != PhaseFinished &&
+		g.playersCanAct() < 2 && g.playersInHand() >= 2 {
+		if err := g.NextPhase(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// playersCanAct counts players who can still take a betting action.
+func (g *Game) playersCanAct() int {
+	n := 0
+	for _, p := range g.Players {
+		if !p.Folded && !p.AllIn {
+			n++
+		}
+	}
+	return n
+}
+
+// playersInHand counts players still contesting the pot (not folded).
+func (g *Game) playersInHand() int {
+	n := 0
+	for _, p := range g.Players {
+		if !p.Folded {
+			n++
+		}
+	}
+	return n
 }
 
 func (g *Game) collectBets() {
